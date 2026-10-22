@@ -1,0 +1,10 @@
+[client]
+showDeployButton = false
+toolbarMode = "minimal"
+
+[theme]
+base = "dark"
+primaryColor = "#00e5ff"
+backgroundColor = "#030d1a"
+secondaryBackgroundColor = "#07172b"
+textColor = "#f8fafc"
