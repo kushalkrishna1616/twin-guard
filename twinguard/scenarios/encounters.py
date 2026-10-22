@@ -56,7 +56,7 @@ def create_head_on_scenario(distance: float = 1200.0, speed: float = 8.0) -> Sce
         own_ship=own_ship,
         target_ships=[target_ship],
         goal_position=np.array([0.0, distance + 300.0]),
-        max_steps=180,
+        max_steps=220,
         dt=1.0
     )
 

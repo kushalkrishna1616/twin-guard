@@ -327,8 +327,7 @@ def render_realistic_ocean_view(history: list[dict], audits: list[dict], goal_po
     st.components.v1.html(html_code, height=640)
 
 
-# Cached Simulation
-@st.cache_data(show_spinner=False)
+# Dynamic Simulation (Instantaneous 20ms Execution)
 def simulate_journey(scenario_key: str, is_gated: bool, drift_val: float, agent_name: str):
     scenario_factory = SCENARIO_BUILDERS[scenario_key]
     env = MaritimeEnv(scenario_config=scenario_factory(), enable_disturbances=True)
