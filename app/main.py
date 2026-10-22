@@ -1,11 +1,12 @@
 """
 TwinGuard: Realistic Maritime Ocean Radar & Autonomous Ship Copilot.
-Features 3-DOF Nomoto kinematics, deep PPO RL agents, ghost rollout fans,
-static reef/island hazards, and one-click assessment PDF generation.
+Combines photorealistic satellite ocean animation with tactical ECDIS marine radar,
+PPO deep reinforcement learning agents, and one-click assessment PDF reporting.
 """
 
 from __future__ import annotations
 import os
+import json
 import time
 import streamlit as st
 import numpy as np
@@ -27,7 +28,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom Nautical & Glassmorphic Styling
+# Custom Styling
 st.markdown("""
 <style>
     .stApp {
@@ -81,7 +82,6 @@ st.markdown("""
         font-size: 1.05rem;
         font-weight: 600;
         margin-bottom: 14px;
-        box-shadow: 0 4px 14px rgba(16, 185, 129, 0.15);
     }
     .near-miss-box {
         background: linear-gradient(135deg, #78350f, #451a03);
@@ -92,7 +92,6 @@ st.markdown("""
         font-size: 1.05rem;
         font-weight: 600;
         margin-bottom: 14px;
-        box-shadow: 0 4px 14px rgba(245, 158, 11, 0.15);
     }
     .crash-box {
         background: linear-gradient(135deg, #7f1d1d, #450a0a);
@@ -103,7 +102,6 @@ st.markdown("""
         font-size: 1.05rem;
         font-weight: 600;
         margin-bottom: 14px;
-        box-shadow: 0 4px 14px rgba(239, 68, 68, 0.2);
     }
     .rule-card {
         background: #0f1d33;
@@ -119,7 +117,7 @@ st.markdown("""
 # Top Title
 st.markdown("<div class='title-text'>⚓ TwinGuard: Maritime Ocean Radar & Ship Safety Copilot</div>", unsafe_allow_html=True)
 st.markdown(
-    "<div class='subtitle-text'>Electronic Nautical Chart (ECDIS / ARPA) view of autonomous vessel navigation with prospective digital-twin gating.</div>",
+    "<div class='subtitle-text'>Electronic Nautical Chart (ECDIS / ARPA) and photorealistic satellite sea simulation for autonomous vessels.</div>",
     unsafe_allow_html=True
 )
 
@@ -209,8 +207,6 @@ if os.path.exists(pdf_file):
             mime="application/pdf",
             use_container_width=True
         )
-else:
-    st.sidebar.caption("Report generating in background...")
 
 
 # Geometry Helpers
@@ -260,7 +256,433 @@ def generate_safety_domain(x: float, y: float, course: float, length: float = 50
     return xs, ys
 
 
-# Simulation Execution
+# Interactive Photorealistic Ocean Canvas Component
+def render_realistic_ocean_view(history: list[dict], audits: list[dict], goal_pos: list[float], static_obs: list):
+    history_json = json.dumps(history)
+    audits_json = json.dumps(audits)
+    goal_json = json.dumps(list(goal_pos))
+    obs_json = json.dumps(list(static_obs))
+
+    html_code = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <meta charset="utf-8">
+    <style>
+      * {{ box-sizing: border-box; }}
+      body {{
+        margin: 0; padding: 0;
+        background: #011627;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        overflow: hidden;
+      }}
+      #container {{
+        position: relative;
+        width: 100%;
+        height: 600px;
+        border-radius: 12px;
+        overflow: hidden;
+        border: 2px solid rgba(56, 189, 248, 0.4);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+      }}
+      canvas {{
+        width: 100%;
+        height: 100%;
+        display: block;
+      }}
+      .ocean-hud {{
+        position: absolute;
+        top: 14px; left: 14px;
+        background: rgba(3, 15, 30, 0.85);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(56, 189, 248, 0.35);
+        border-radius: 10px;
+        padding: 10px 16px;
+        color: #e0f2fe;
+        font-size: 13px;
+        line-height: 1.5;
+        z-index: 10;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+      }}
+      .ocean-hud-val {{ font-size: 16px; font-weight: 800; color: #38bdf8; }}
+      .controls-bar {{
+        position: absolute;
+        bottom: 14px; left: 50%;
+        transform: translateX(-50%);
+        background: rgba(2, 12, 24, 0.88);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(56, 189, 248, 0.35);
+        border-radius: 30px;
+        padding: 8px 18px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: #fff;
+        z-index: 10;
+        box-shadow: 0 8px 25px rgba(0,0,0,0.6);
+      }}
+      .btn {{
+        background: #0284c7;
+        border: none;
+        color: white;
+        padding: 6px 14px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }}
+      .btn:hover {{ background: #00e5ff; color: #021226; transform: translateY(-1px); }}
+      .time-slider {{
+        width: 220px;
+        accent-color: #00e5ff;
+        cursor: pointer;
+      }}
+      .speed-btn {{
+        background: rgba(14, 116, 144, 0.5);
+        border: 1px solid rgba(56, 189, 248, 0.3);
+        color: #7dd3fc;
+        padding: 4px 8px;
+        border-radius: 6px;
+        font-size: 11px;
+        cursor: pointer;
+      }}
+      .speed-btn.active {{ background: #00e5ff; color: #000; font-weight: bold; }}
+    </style>
+    </head>
+    <body>
+    <div id="container">
+      <div class="ocean-hud">
+        <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: #7dd3fc; font-weight: bold;">
+          🛰️ SATELLITE OCEAN WATER CAMERA
+        </div>
+        <div>Heading: <span id="hudCourse" class="ocean-hud-val">000°</span> | Speed: <span id="hudSpeed" class="ocean-hud-val">8.0 kts</span></div>
+        <div>Clearance: <span id="hudClearance" class="ocean-hud-val" style="color:#10b981;">Safe</span></div>
+        <div style="font-size:11px; color:#94a3b8; margin-top:2px;">TwinGuard: <span id="hudGate" style="color:#10b981; font-weight:bold;">APPROVE</span></div>
+      </div>
+
+      <canvas id="oceanCanvas"></canvas>
+
+      <div class="controls-bar">
+        <button class="btn" id="playBtn">▶ Play Sea Run</button>
+        <button class="btn" id="rewindBtn">⏮ Restart</button>
+        <span id="timeText" style="font-size: 12px; font-weight: bold; color: #7dd3fc; min-width: 55px;">T+000s</span>
+        <input type="range" id="timeSlider" class="time-slider" min="0" max="{len(history)-1}" value="0">
+        <button class="speed-btn active" id="spd1">1x</button>
+        <button class="speed-btn" id="spd2">2x</button>
+        <button class="speed-btn" id="spd4">4x</button>
+      </div>
+    </div>
+
+    <script>
+      const history = {history_json};
+      const audits = {audits_json};
+      const goalPos = {goal_json};
+      const staticObs = {obs_json};
+
+      const canvas = document.getElementById("oceanCanvas");
+      const ctx = canvas.getContext("2d");
+
+      let width, height;
+      function resize() {{
+        width = canvas.width = canvas.parentElement.clientWidth;
+        height = canvas.height = canvas.parentElement.clientHeight;
+      }}
+      window.addEventListener("resize", resize);
+      resize();
+
+      let currentFrame = 0;
+      let isPlaying = true;
+      let speedMultiplier = 1;
+      let waveOffset = 0;
+
+      function toScreen(x, y) {{
+        const scale = Math.min(width / 3200, height / 2400) * 1.35;
+        const cx = width / 2;
+        const cy = height * 0.65;
+        return {{
+          x: cx + x * scale,
+          y: cy - (y - 300) * scale,
+          scale: scale
+        }};
+      }}
+
+      function drawOceanWater() {{
+        // Deep turquoise blue ocean gradient
+        const grad = ctx.createLinearGradient(0, 0, 0, height);
+        grad.addColorStop(0, "#012a4a");
+        grad.addColorStop(0.3, "#014f86");
+        grad.addColorStop(0.7, "#2a6f97");
+        grad.addColorStop(1, "#013a63");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, width, height);
+
+        // Undulating waves
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.14)";
+        ctx.lineWidth = 1.5;
+        for (let row = 25; row < height; row += 40) {{
+          ctx.beginPath();
+          for (let col = 0; col < width; col += 20) {{
+            const waveY = row + Math.sin(col * 0.02 + waveOffset + row * 0.1) * 4;
+            if (col === 0) ctx.moveTo(col, waveY);
+            else ctx.lineTo(col, waveY);
+          }}
+          ctx.stroke();
+        }}
+
+        // Sunlight reflections
+        ctx.fillStyle = "rgba(0, 229, 255, 0.04)";
+        for (let i = 0; i < 8; i++) {{
+          const sx = ((i * 180 + waveOffset * 25) % (width + 200)) - 100;
+          const sy = (i * 75) % height;
+          ctx.beginPath();
+          ctx.ellipse(sx, sy, 80, 25, Math.PI / 6, 0, Math.PI * 2);
+          ctx.fill();
+        }}
+      }}
+
+      function drawIslands() {{
+        if (!staticObs || staticObs.length === 0) return;
+        staticObs.forEach(([ox, oy, orad]) => {{
+          const sc = toScreen(ox, oy);
+          const rPix = orad * sc.scale;
+
+          // Shallow coral reef
+          ctx.fillStyle = "rgba(13, 148, 136, 0.45)";
+          ctx.beginPath();
+          ctx.arc(sc.x, sc.y, rPix * 1.5, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
+          ctx.lineWidth = 2;
+          ctx.setLineDash([8, 8]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          // Golden Sand Beach
+          ctx.fillStyle = "#eab308";
+          ctx.beginPath();
+          ctx.arc(sc.x, sc.y, rPix * 1.05, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Island Foliage Core
+          ctx.fillStyle = "#15803d";
+          ctx.beginPath();
+          ctx.arc(sc.x, sc.y, rPix * 0.85, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Lighthouse
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(sc.x - 4, sc.y - 12, 8, 16);
+          ctx.fillStyle = "#ef4444";
+          ctx.fillRect(sc.x - 4, sc.y - 6, 8, 4);
+
+          const pulse = (Math.sin(waveOffset * 3) + 1) * 0.5;
+          ctx.fillStyle = `rgba(253, 224, 71, ${0.25 + pulse * 0.5})`;
+          ctx.beginPath();
+          ctx.arc(sc.x, sc.y - 12, 22 + pulse * 12, 0, Math.PI * 2);
+          ctx.fill();
+        }});
+      }}
+
+      function drawWaypoint() {{
+        const sc = toScreen(goalPos[0], goalPos[1]);
+        const ringR = (waveOffset * 15) % 35;
+        ctx.strokeStyle = `rgba(74, 222, 128, ${1.0 - ringR / 35})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(sc.x, sc.y, ringR, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.fillStyle = "#22c55e";
+        ctx.beginPath();
+        ctx.arc(sc.x, sc.y, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = "#ecfdf5";
+        ctx.font = "bold 12px sans-serif";
+        ctx.fillText("DESTINATION BUOY", sc.x - 55, sc.y - 14);
+      }}
+
+      function drawShip(x, y, course, speed, isOurShip, shipName, colorHex) {{
+        const sc = toScreen(x, y);
+        const L = (isOurShip ? 120 : 110) * sc.scale;
+        const B = (isOurShip ? 34 : 32) * sc.scale;
+
+        ctx.save();
+        ctx.translate(sc.x, sc.y);
+        ctx.rotate(course);
+
+        // Propeller Wake Foam
+        const wakeL = Math.max(40, speed * 12) * sc.scale;
+        const wakeW = wakeL * 0.45;
+        const sternY = L * 0.45;
+
+        const wakeGrad = ctx.createLinearGradient(0, sternY, 0, sternY + wakeL);
+        wakeGrad.addColorStop(0, "rgba(255, 255, 255, 0.75)");
+        wakeGrad.addColorStop(0.5, "rgba(200, 240, 255, 0.4)");
+        wakeGrad.addColorStop(1, "rgba(255, 255, 255, 0)");
+
+        ctx.fillStyle = wakeGrad;
+        ctx.beginPath();
+        ctx.moveTo(0, sternY);
+        ctx.lineTo(-wakeW, sternY + wakeL);
+        ctx.lineTo(wakeW, sternY + wakeL);
+        ctx.closePath();
+        ctx.fill();
+
+        // Shadow
+        ctx.fillStyle = "rgba(0, 15, 35, 0.45)";
+        ctx.beginPath();
+        ctx.ellipse(6, 6, B * 0.55, L * 0.52, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Hull
+        ctx.fillStyle = colorHex;
+        ctx.beginPath();
+        ctx.moveTo(0, -L * 0.52);
+        ctx.lineTo(B * 0.48, -L * 0.22);
+        ctx.lineTo(B * 0.48, L * 0.38);
+        ctx.lineTo(B * 0.25, L * 0.48);
+        ctx.lineTo(-B * 0.25, L * 0.48);
+        ctx.lineTo(-B * 0.48, L * 0.38);
+        ctx.lineTo(-B * 0.48, -L * 0.22);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1.8;
+        ctx.stroke();
+
+        // Cargo Containers
+        const colors = ["#ef4444", "#3b82f6", "#eab308", "#10b981", "#8b5cf6"];
+        const cW = B * 0.35;
+        const cH = L * 0.12;
+        for (let row = -L * 0.18; row < L * 0.22; row += cH + 2) {{
+          ctx.fillStyle = colors[Math.abs(Math.floor(row * 7)) % colors.length];
+          ctx.fillRect(-cW * 0.9, row, cW * 0.8, cH);
+          ctx.fillStyle = colors[Math.abs(Math.floor(row * 13)) % colors.length];
+          ctx.fillRect(cW * 0.1, row, cW * 0.8, cH);
+        }}
+
+        // Bridge Deckhouse
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(-B * 0.35, L * 0.25, B * 0.7, L * 0.15);
+        ctx.fillStyle = "#0284c7";
+        ctx.fillRect(-B * 0.28, L * 0.26, B * 0.56, 3);
+
+        // Navigation lights
+        ctx.fillStyle = "#22c55e";
+        ctx.beginPath();
+        ctx.arc(B * 0.48, -L * 0.2, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "#ef4444";
+        ctx.beginPath();
+        ctx.arc(-B * 0.48, -L * 0.2, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 12px sans-serif";
+        ctx.fillText(shipName, sc.x + B * 0.8, sc.y);
+      }}
+
+      function render() {{
+        waveOffset += 0.03;
+        drawOceanWater();
+        drawIslands();
+        drawWaypoint();
+
+        const state = history[currentFrame];
+        const aud = audits[currentFrame] || {};
+
+        if (state.targets) {{
+          const tColors = ["#ef4444", "#f97316", "#a855f7"];
+          state.targets.forEach((tgt, i) => {{
+            drawShip(tgt.x, tgt.y, tgt.course, tgt.speed, false, `OTHER SHIP ${i+1}`, tColors[i % tColors.length]);
+          }});
+        }}
+
+        drawShip(state.own_x, state.own_y, state.own_course, state.own_speed, true, "OUR VESSEL (TwinGuard)", "#0284c7");
+
+        const deg = Math.round((state.own_course * 180 / Math.PI)) % 360;
+        document.getElementById("hudCourse").innerText = `${deg < 0 ? deg + 360 : deg}°`;
+        document.getElementById("hudSpeed").innerText = `${(state.own_speed * 1.94).toFixed(1)} kts`;
+        document.getElementById("timeText").innerText = `T+${state.step || currentFrame}s`;
+        document.getElementById("timeSlider").value = currentFrame;
+
+        const dists = (state.targets || []).map(t => Math.hypot(state.own_x - t.x, state.own_y - t.y));
+        const minD = dists.length > 0 ? Math.min(...dists) : 9999;
+        const hudClearance = document.getElementById("hudClearance");
+        hudClearance.innerText = `${minD.toFixed(0)} m`;
+        hudClearance.style.color = minD < 100 ? "#ef4444" : (minD < 300 ? "#f59e0b" : "#10b981");
+
+        const dec = aud.decision || "APPROVE";
+        const hudGate = document.getElementById("hudGate");
+        hudGate.innerText = typeof dec === "object" ? (dec.value || "APPROVE") : dec;
+        hudGate.style.color = dec === "APPROVE" ? "#10b981" : (dec === "MODIFY" ? "#f59e0b" : "#ef4444");
+
+        if (isPlaying) {{
+          currentFrame += speedMultiplier;
+          if (currentFrame >= history.length) {{
+            currentFrame = history.length - 1;
+            isPlaying = false;
+            document.getElementById("playBtn").innerText = "▶ Replay";
+          }}
+        }}
+
+        requestAnimationFrame(render);
+      }}
+
+      const playBtn = document.getElementById("playBtn");
+      playBtn.addEventListener("click", () => {{
+        if (currentFrame >= history.length - 1) {{
+          currentFrame = 0;
+          isPlaying = true;
+          playBtn.innerText = "⏸ Pause";
+        }} else {{
+          isPlaying = !isPlaying;
+          playBtn.innerText = isPlaying ? "⏸ Pause" : "▶ Play";
+        }}
+      }});
+
+      document.getElementById("rewindBtn").addEventListener("click", () => {{
+        currentFrame = 0;
+        isPlaying = true;
+        playBtn.innerText = "⏸ Pause";
+      }});
+
+      document.getElementById("timeSlider").addEventListener("input", (e) => {{
+        currentFrame = parseInt(e.target.value);
+        isPlaying = false;
+        playBtn.innerText = "▶ Play";
+      }});
+
+      function setSpeed(spd, btnId) {{
+        speedMultiplier = spd;
+        ["spd1", "spd2", "spd4"].forEach(id => document.getElementById(id).classList.remove("active"));
+        document.getElementById(btnId).classList.add("active");
+      }}
+      document.getElementById("spd1").addEventListener("click", () => setSpeed(1, "spd1"));
+      document.getElementById("spd2").addEventListener("click", () => setSpeed(2, "spd2"));
+      document.getElementById("spd4").addEventListener("click", () => setSpeed(4, "spd4"));
+
+      render();
+    </script>
+    </body>
+    </html>
+    """
+    st.components.v1.html(html_code, height=620)
+
+
+# Cached Simulation
 @st.cache_data(show_spinner=False)
 def simulate_journey(scenario_key: str, is_gated: bool, drift_val: float, agent_name: str):
     scenario_factory = SCENARIO_BUILDERS[scenario_key]
@@ -281,7 +703,7 @@ def simulate_journey(scenario_key: str, is_gated: bool, drift_val: float, agent_
 
 # Tabs
 tab_radar, tab_compare, tab_guide = st.tabs([
-    "🌊 Live Ocean ECDIS Radar (Interactive Simulator)",
+    "🌊 Live Ocean Sea & Radar View",
     "📊 Comparative Safety Benchmark (Gated vs Ungated)",
     "📖 Quick Maritime Rules & System Guide"
 ])
@@ -311,365 +733,307 @@ with tab_radar:
     total_frames = len(history)
 
     with col_screen:
-        col_slider, col_play = st.columns([4, 1])
-        with col_slider:
-            frame_idx = st.slider(
-                "🕹️ Drag Playback Slider to Steer & Navigate:",
-                min_value=1,
-                max_value=total_frames,
-                value=total_frames,
-                help="Move slider to watch vessels maneuver across the ocean."
-            ) - 1
-        with col_play:
-            st.write("")
-            play_btn = st.button("▶ Auto-Play", use_container_width=True)
+        # Camera Mode Switcher
+        view_mode = st.radio(
+            "Select Ocean Camera Mode:",
+            options=[
+                "🌊 Photorealistic Satellite Ocean View (Real Blue Sea, Waves & Moving Cargo Ships)",
+                "🧭 Tactical ECDIS Marine Radar (Electronic Nautical Chart)"
+            ],
+            horizontal=True
+        )
 
-        curr_state = history[frame_idx]
-        past_history = history[:frame_idx + 1]
+        goal_pos = SCENARIO_BUILDERS[chosen_key]().goal_position
+        curr_state = history[-1]
+        static_obs = curr_state.get("static_obstacles", [])
 
-        own_x, own_y = curr_state["own_x"], curr_state["own_y"]
-        own_spd = curr_state.get("own_speed", 8.0)
-        own_crs = curr_state.get("own_course", 0.0)
-        own_crs_deg = (int(np.rad2deg(own_crs))) % 360
+        if "Photorealistic" in view_mode:
+            # 1. Real Blue Ocean View
+            render_realistic_ocean_view(history, audits, goal_pos, static_obs)
+        else:
+            # 2. Tactical ECDIS Radar View
+            col_slider, col_play = st.columns([4, 1])
+            with col_slider:
+                frame_idx = st.slider(
+                    "🕹️ Drag Playback Slider to Steer & Navigate:",
+                    min_value=1,
+                    max_value=total_frames,
+                    value=total_frames
+                ) - 1
+            with col_play:
+                st.write("")
+                play_btn = st.button("▶ Auto-Play", use_container_width=True)
 
-        aud_rec = audits[frame_idx] if (audits and frame_idx < len(audits)) else {}
-        decision_label = aud_rec.get("decision", "APPROVE")
-        if hasattr(decision_label, "value"):
-            decision_label = decision_label.value
-        risk_bound = aud_rec.get("calibrated_upper_risk", 0.0)
-        action_reason = aud_rec.get("reason", "Action certified safe by counterfactual rollouts.")
+            curr_state = history[frame_idx]
+            past_history = history[:frame_idx + 1]
 
-        # --- TELEMETRY HUD BAR ---
-        col_h1, col_h2, col_h3, col_h4, col_h5 = st.columns(5)
-        with col_h1:
-            st.markdown(
-                f"<div class='hud-card'><div class='hud-label'>🧭 True Heading</div>"
-                f"<div class='hud-value'>{own_crs_deg:03d}°</div>"
-                f"<div class='hud-sub'>Course Over Ground</div></div>",
-                unsafe_allow_html=True
-            )
-        with col_h2:
-            knots = own_spd * 1.94384
-            st.markdown(
-                f"<div class='hud-card'><div class='hud-label'>⚡ Vessel Speed</div>"
-                f"<div class='hud-value'>{knots:.1f} <span style='font-size:0.9rem;'>kts</span></div>"
-                f"<div class='hud-sub'>{own_spd:.1f} m/s</div></div>",
-                unsafe_allow_html=True
-            )
-        with col_h3:
-            dists = [np.hypot(own_x - t['x'], own_y - t['y']) for t in curr_state['targets']] if curr_state['targets'] else [9999]
-            if curr_state.get("static_obstacles"):
-                for (ox, oy, orad) in curr_state["static_obstacles"]:
-                    dists.append(np.hypot(own_x - ox, own_y - oy) - orad)
-            min_now = min(dists)
-            dist_col = "#ef4444" if min_now < 100 else ("#f59e0b" if min_now < 300 else "#10b981")
-            st.markdown(
-                f"<div class='hud-card'><div class='hud-label'>📏 Target Clearance</div>"
-                f"<div class='hud-value' style='color:{dist_col};'>{min_now:.0f} m</div>"
-                f"<div class='hud-sub'>Closest Hazard</div></div>",
-                unsafe_allow_html=True
-            )
-        with col_h4:
-            st.markdown(
-                f"<div class='hud-card'><div class='hud-label'>⏱️ Mission Time</div>"
-                f"<div class='hud-value'>{frame_idx + 1}s</div>"
-                f"<div class='hud-sub'>of {total_frames}s journey</div></div>",
-                unsafe_allow_html=True
-            )
-        with col_h5:
-            dec_badge_col = "#10b981" if decision_label == "APPROVE" else ("#f59e0b" if decision_label == "MODIFY" else "#ef4444")
-            st.markdown(
-                f"<div class='hud-card' style='border-color:{dec_badge_col};'><div class='hud-label'>🛡️ Copilot Gating</div>"
-                f"<div class='hud-value' style='color:{dec_badge_col}; font-size:1.15rem;'>{decision_label}</div>"
-                f"<div class='hud-sub'>Certified Risk: {risk_bound:.2f}</div></div>",
-                unsafe_allow_html=True
-            )
+            own_x, own_y = curr_state["own_x"], curr_state["own_y"]
+            own_spd = curr_state.get("own_speed", 8.0)
+            own_crs = curr_state.get("own_course", 0.0)
+            own_crs_deg = (int(np.rad2deg(own_crs))) % 360
 
-        # --- OCEAN ECDIS PLOT ---
-        fig = go.Figure()
+            aud_rec = audits[frame_idx] if (audits and frame_idx < len(audits)) else {}
+            decision_label = aud_rec.get("decision", "APPROVE")
+            if hasattr(decision_label, "value"):
+                decision_label = decision_label.value
+            risk_bound = aud_rec.get("calibrated_upper_risk", 0.0)
+            action_reason = aud_rec.get("reason", "Action certified safe by counterfactual rollouts.")
 
-        # Depth Contours
-        x_sea = np.linspace(-3200, 3200, 80)
-        for offset, depth_lbl in [(-1200, "-120m Deep Sea"), (400, "-60m Continental Shelf"), (1900, "-25m Coastal Fairway")]:
-            y_sea = offset + 260 * np.sin(x_sea / 1200.0) + 120 * np.cos(x_sea / 700.0)
-            fig.add_trace(go.Scatter(
-                x=x_sea, y=y_sea,
-                mode="lines",
-                line=dict(color="rgba(14, 116, 144, 0.28)", width=1.5, dash="longdash"),
-                hoverinfo="text",
-                text=[f"Bathymetry: {depth_lbl}"] * len(x_sea),
-                showlegend=False
-            ))
+            col_h1, col_h2, col_h3, col_h4, col_h5 = st.columns(5)
+            with col_h1:
+                st.markdown(
+                    f"<div class='hud-card'><div class='hud-label'>🧭 True Heading</div>"
+                    f"<div class='hud-value'>{own_crs_deg:03d}°</div>"
+                    f"<div class='hud-sub'>Course Over Ground</div></div>",
+                    unsafe_allow_html=True
+                )
+            with col_h2:
+                knots = own_spd * 1.94384
+                st.markdown(
+                    f"<div class='hud-card'><div class='hud-label'>⚡ Vessel Speed</div>"
+                    f"<div class='hud-value'>{knots:.1f} <span style='font-size:0.9rem;'>kts</span></div>"
+                    f"<div class='hud-sub'>{own_spd:.1f} m/s</div></div>",
+                    unsafe_allow_html=True
+                )
+            with col_h3:
+                dists = [np.hypot(own_x - t['x'], own_y - t['y']) for t in curr_state['targets']] if curr_state['targets'] else [9999]
+                if curr_state.get("static_obstacles"):
+                    for (ox, oy, orad) in curr_state["static_obstacles"]:
+                        dists.append(np.hypot(own_x - ox, own_y - oy) - orad)
+                min_now = min(dists)
+                dist_col = "#ef4444" if min_now < 100 else ("#f59e0b" if min_now < 300 else "#10b981")
+                st.markdown(
+                    f"<div class='hud-card'><div class='hud-label'>📏 Target Clearance</div>"
+                    f"<div class='hud-value' style='color:{dist_col};'>{min_now:.0f} m</div>"
+                    f"<div class='hud-sub'>Closest Hazard</div></div>",
+                    unsafe_allow_html=True
+                )
+            with col_h4:
+                st.markdown(
+                    f"<div class='hud-card'><div class='hud-label'>⏱️ Mission Time</div>"
+                    f"<div class='hud-value'>{frame_idx + 1}s</div>"
+                    f"<div class='hud-sub'>of {total_frames}s journey</div></div>",
+                    unsafe_allow_html=True
+                )
+            with col_h5:
+                dec_badge_col = "#10b981" if decision_label == "APPROVE" else ("#f59e0b" if decision_label == "MODIFY" else "#ef4444")
+                st.markdown(
+                    f"<div class='hud-card' style='border-color:{dec_badge_col};'><div class='hud-label'>🛡️ Copilot Gating</div>"
+                    f"<div class='hud-value' style='color:{dec_badge_col}; font-size:1.15rem;'>{decision_label}</div>"
+                    f"<div class='hud-sub'>Certified Risk: {risk_bound:.2f}</div></div>",
+                    unsafe_allow_html=True
+                )
 
-        # Range Rings
-        angles = np.linspace(0, 2 * np.pi, 90)
-        center_y = 600
-        for r, nm in [(500, "0.27 NM"), (1000, "0.54 NM"), (1500, "0.81 NM")]:
-            fig.add_trace(go.Scatter(
-                x=r * np.cos(angles),
-                y=r * np.sin(angles) + center_y,
-                mode="lines",
-                line=dict(color="rgba(56, 189, 248, 0.16)", width=1, dash="dot"),
-                hoverinfo="none",
-                showlegend=False
-            ))
-            fig.add_trace(go.Scatter(
-                x=[r * 0.707], y=[center_y + r * 0.707],
-                mode="text",
-                text=[f"<b>{r}m</b> ({nm})"],
-                textfont=dict(color="rgba(148, 163, 184, 0.45)", size=9),
-                hoverinfo="none",
-                showlegend=False
-            ))
+            # Build Radar Plot
+            fig = go.Figure()
 
-        # Static Hazards (Reefs & Islands)
-        if curr_state.get("static_obstacles"):
-            for oi, (ox, oy, orad) in enumerate(curr_state["static_obstacles"]):
-                angles_c = np.linspace(0, 2*np.pi, 45)
-                # Reef warning zone
-                reef_r = orad + 80.0
+            x_sea = np.linspace(-3200, 3200, 80)
+            for offset, depth_lbl in [(-1200, "-120m Deep Sea"), (400, "-60m Continental Shelf"), (1900, "-25m Coastal Fairway")]:
+                y_sea = offset + 260 * np.sin(x_sea / 1200.0) + 120 * np.cos(x_sea / 700.0)
                 fig.add_trace(go.Scatter(
-                    x=ox + reef_r * np.cos(angles_c),
-                    y=oy + reef_r * np.sin(angles_c),
+                    x=x_sea, y=y_sea,
                     mode="lines",
-                    fill="toself",
-                    fillcolor="rgba(245, 158, 11, 0.16)",
-                    line=dict(color="rgba(245, 158, 11, 0.6)", width=1.5, dash="dot"),
-                    name="Shallow Reef Warning",
+                    line=dict(color="rgba(14, 116, 144, 0.28)", width=1.5, dash="longdash"),
                     hoverinfo="text",
-                    text=[f"Reef Danger Zone ({reef_r:.0f}m)"] * len(angles_c)
-                ))
-                # Island rock core
-                fig.add_trace(go.Scatter(
-                    x=ox + orad * np.cos(angles_c),
-                    y=oy + orad * np.sin(angles_c),
-                    mode="lines",
-                    fill="toself",
-                    fillcolor="#451a03",
-                    line=dict(color="#d97706", width=2.5),
-                    name=f"Island {oi+1} (Hazard)",
-                    hoverinfo="text",
-                    text=[f"Rocky Island Barrier #{oi+1}"] * len(angles_c)
-                ))
-                # Lighthouse beacon
-                fig.add_trace(go.Scatter(
-                    x=[ox], y=[oy],
-                    mode="markers+text",
-                    name="Beacon Buoy",
-                    text=["<b>LIGHTHOUSE</b>"],
-                    textposition="top center",
-                    textfont=dict(color="#fde047", size=11),
-                    marker=dict(symbol="diamond", size=15, color="#eab308", line=dict(color="#ffffff", width=2)),
+                    text=[f"Bathymetry: {depth_lbl}"] * len(x_sea),
                     showlegend=False
                 ))
 
-        # Fairway Goal Waypoint
-        goal_pos = SCENARIO_BUILDERS[chosen_key]().goal_position
-        fig.add_trace(go.Scatter(
-            x=[goal_pos[0]], y=[goal_pos[1]],
-            mode="markers+text",
-            name="Fairway Waypoint (Goal)",
-            text=["<b>WAYPOINT</b>"],
-            textposition="top center",
-            textfont=dict(color="#4ade80", size=13),
-            marker=dict(symbol="star", size=22, color="#22c55e", line=dict(color="#ffffff", width=2))
-        ))
-
-        # Ship Foaming Wake
-        our_wake_x, our_wake_y = generate_ship_wake(own_x, own_y, own_crs, own_spd, length=120.0)
-        fig.add_trace(go.Scatter(
-            x=our_wake_x, y=our_wake_y,
-            mode="lines",
-            name="Ship Foam Wake",
-            line=dict(color="rgba(255, 255, 255, 0.35)", width=2.5),
-            hoverinfo="none",
-            showlegend=False
-        ))
-
-        # Protective Domain Bubble
-        dom_x, dom_y = generate_safety_domain(own_x, own_y, own_crs, length=50.0)
-        dom_fill_col = "rgba(16, 185, 129, 0.08)" if min_now > 250 else ("rgba(245, 158, 11, 0.14)" if min_now > 90 else "rgba(239, 68, 68, 0.20)")
-        dom_line_col = "#10b981" if min_now > 250 else ("#f59e0b" if min_now > 90 else "#ef4444")
-        fig.add_trace(go.Scatter(
-            x=dom_x, y=dom_y,
-            mode="lines",
-            fill="toself",
-            fillcolor=dom_fill_col,
-            line=dict(color=dom_line_col, width=1.5, dash="dash"),
-            name="Protective Safety Buffer",
-            hoverinfo="text",
-            text=["TwinGuard Certified Safety Zone"] * len(dom_x)
-        ))
-
-        # Prospective Counterfactual Rollout Fan (Ghost Futures)
-        if show_fan and aud_rec and "counterfactual_summary" in aud_rec:
-            c_sum = aud_rec.get("counterfactual_summary")
-            if c_sum and "rollouts" in c_sum:
-                for k, ro in enumerate(c_sum["rollouts"][:6]):
-                    traj = ro.get("own_trajectory", [])
-                    if len(traj) > 1:
-                        rx = [pt[0] for pt in traj]
-                        ry = [pt[1] for pt in traj]
-                        if ro.get("collision_occurred"):
-                            fan_col = "rgba(239, 68, 68, 0.55)" # Hazard
-                        elif ro.get("domain_violation_occurred"):
-                            fan_col = "rgba(245, 158, 11, 0.50)" # Near miss
-                        else:
-                            fan_col = "rgba(56, 189, 248, 0.45)" # Certified Safe
-                        fig.add_trace(go.Scatter(
-                            x=rx, y=ry,
-                            mode="lines",
-                            line=dict(color=fan_col, width=2, dash="dot"),
-                            name="Rollout Fan (Ghost Futures)" if k == 0 else None,
-                            hoverinfo="text",
-                            text=[f"What-If Future #{k+1} | Clearance: {ro.get('min_distance', 0):.0f}m"] * len(rx),
-                            showlegend=(k == 0)
-                        ))
-
-        # Own Ship Past Track
-        own_past_x = [p["own_x"] for p in past_history]
-        own_past_y = [p["own_y"] for p in past_history]
-        fig.add_trace(go.Scatter(
-            x=own_past_x, y=own_past_y,
-            mode="lines",
-            name="Our Ship Track",
-            line=dict(color="#00d2ff", width=3.5)
-        ))
-
-        # Own Ship Hull
-        hull_x, hull_y = generate_ship_hull(own_x, own_y, own_crs, length=120.0, beam=34.0)
-        fig.add_trace(go.Scatter(
-            x=hull_x, y=hull_y,
-            mode="lines",
-            fill="toself",
-            fillcolor="#0284c7",
-            line=dict(color="#ffffff", width=2.5),
-            name="Our Autonomous Vessel",
-            hoverinfo="text",
-            text=[f"Our Ship | Speed: {own_spd:.1f} m/s | Heading: {own_crs_deg}°"] * len(hull_x)
-        ))
-
-        # Velocity Leader Vector
-        leader_len = max(100.0, own_spd * 25.0)
-        fig.add_trace(go.Scatter(
-            x=[own_x, own_x + leader_len * np.sin(own_crs)],
-            y=[own_y, own_y + leader_len * np.cos(own_crs)],
-            mode="lines",
-            line=dict(color="#38bdf8", width=2, dash="dot"),
-            hoverinfo="none",
-            showlegend=False
-        ))
-
-        # Target Vessels
-        target_colors = ["#f43f5e", "#fb923c", "#ec4899"]
-        if curr_state["targets"]:
-            for i, tgt in enumerate(curr_state["targets"]):
-                tid = tgt["id"]
-                t_col = target_colors[i % len(target_colors)]
-                t_x, t_y = tgt["x"], tgt["y"]
-                t_crs = tgt.get("course", np.pi)
-                t_spd = tgt.get("speed", 7.0)
-
-                t_wake_x, t_wake_y = generate_ship_wake(t_x, t_y, t_crs, t_spd, length=110.0)
+            angles = np.linspace(0, 2 * np.pi, 90)
+            center_y = 600
+            for r, nm in [(500, "0.27 NM"), (1000, "0.54 NM"), (1500, "0.81 NM")]:
                 fig.add_trace(go.Scatter(
-                    x=t_wake_x, y=t_wake_y,
+                    x=r * np.cos(angles),
+                    y=r * np.sin(angles) + center_y,
                     mode="lines",
-                    line=dict(color="rgba(255, 255, 255, 0.28)", width=2),
+                    line=dict(color="rgba(56, 189, 248, 0.16)", width=1, dash="dot"),
                     hoverinfo="none",
                     showlegend=False
                 ))
 
-                t_past_x = [next(t["x"] for t in p["targets"] if t["id"] == tid) for p in past_history]
-                t_past_y = [next(t["y"] for t in p["targets"] if t["id"] == tid) for p in past_history]
-                fig.add_trace(go.Scatter(
-                    x=t_past_x, y=t_past_y,
-                    mode="lines",
-                    name=f"Other Ship {i+1} Track",
-                    line=dict(color=t_col, width=2.5, dash="dash")
-                ))
+            if curr_state.get("static_obstacles"):
+                for oi, (ox, oy, orad) in enumerate(curr_state["static_obstacles"]):
+                    angles_c = np.linspace(0, 2*np.pi, 45)
+                    reef_r = orad + 80.0
+                    fig.add_trace(go.Scatter(
+                        x=ox + reef_r * np.cos(angles_c),
+                        y=oy + reef_r * np.sin(angles_c),
+                        mode="lines",
+                        fill="toself",
+                        fillcolor="rgba(245, 158, 11, 0.16)",
+                        line=dict(color="rgba(245, 158, 11, 0.6)", width=1.5, dash="dot"),
+                        name="Shallow Reef Warning",
+                        hoverinfo="text",
+                        text=[f"Reef Danger Zone ({reef_r:.0f}m)"] * len(angles_c)
+                    ))
+                    fig.add_trace(go.Scatter(
+                        x=ox + orad * np.cos(angles_c),
+                        y=oy + orad * np.sin(angles_c),
+                        mode="lines",
+                        fill="toself",
+                        fillcolor="#451a03",
+                        line=dict(color="#d97706", width=2.5),
+                        name=f"Island {oi+1} (Hazard)",
+                        hoverinfo="text",
+                        text=[f"Rocky Island Barrier #{oi+1}"] * len(angles_c)
+                    ))
 
-                t_hull_x, t_hull_y = generate_ship_hull(t_x, t_y, t_crs, length=115.0, beam=32.0)
-                fig.add_trace(go.Scatter(
-                    x=t_hull_x, y=t_hull_y,
-                    mode="lines",
-                    fill="toself",
-                    fillcolor=t_col,
-                    line=dict(color="#ffffff", width=2),
-                    name=f"Other Vessel {i+1}",
-                    hoverinfo="text",
-                    text=[f"Target {i+1} | Speed: {t_spd:.1f} m/s | Heading: {int(np.rad2deg(t_crs))%360}°"] * len(t_hull_x)
-                ))
+            fig.add_trace(go.Scatter(
+                x=[goal_pos[0]], y=[goal_pos[1]],
+                mode="markers+text",
+                name="Fairway Waypoint (Goal)",
+                text=["<b>WAYPOINT</b>"],
+                textposition="top center",
+                textfont=dict(color="#4ade80", size=13),
+                marker=dict(symbol="star", size=22, color="#22c55e", line=dict(color="#ffffff", width=2))
+            ))
 
-        # Compass Rose
-        compass_x, compass_y = -2600, 2000
-        fig.add_trace(go.Scatter(
-            x=[compass_x, compass_x],
-            y=[compass_y - 200, compass_y + 200],
-            mode="lines+text",
-            line=dict(color="rgba(56, 189, 248, 0.6)", width=2),
-            text=["", "<b>N</b>"],
-            textposition="top center",
-            textfont=dict(color="#38bdf8", size=14),
-            hoverinfo="none",
-            showlegend=False
-        ))
-        fig.add_trace(go.Scatter(
-            x=[compass_x - 200, compass_x + 200],
-            y=[compass_y, compass_y],
-            mode="lines+text",
-            line=dict(color="rgba(56, 189, 248, 0.6)", width=2),
-            text=["<b>W</b>", "<b>E</b>"],
-            textposition=["middle left", "middle right"],
-            textfont=dict(color="#38bdf8", size=12),
-            hoverinfo="none",
-            showlegend=False
-        ))
+            our_wake_x, our_wake_y = generate_ship_wake(own_x, own_y, own_crs, own_spd, length=120.0)
+            fig.add_trace(go.Scatter(
+                x=our_wake_x, y=our_wake_y,
+                mode="lines",
+                name="Ship Foam Wake",
+                line=dict(color="rgba(255, 255, 255, 0.35)", width=2.5),
+                hoverinfo="none",
+                showlegend=False
+            ))
 
-        # Layout
-        fig.update_layout(
-            title=dict(
-                text=f"🌊 Marine Electronic Chart Display (ECDIS) — Ocean Time: <b>T+{frame_idx + 1}s</b>",
-                font=dict(color="#f8fafc", size=15)
-            ),
-            xaxis=dict(
-                title="West <--- Nautical Distance (Meters) ---> East",
-                gridcolor="rgba(14, 116, 144, 0.18)",
-                zerolinecolor="rgba(56, 189, 248, 0.3)",
-                range=[-3200, 3200]
-            ),
-            yaxis=dict(
-                title="South <--- Nautical Distance (Meters) ---> North",
-                gridcolor="rgba(14, 116, 144, 0.18)",
-                zerolinecolor="rgba(56, 189, 248, 0.3)",
-                range=[-1200, 2400]
-            ),
-            plot_bgcolor="#06182c",
-            paper_bgcolor="#030f1c",
-            height=600,
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1,
-                bgcolor="rgba(7, 23, 43, 0.75)",
-                bordercolor="rgba(56, 189, 248, 0.2)",
-                borderwidth=1
+            dom_x, dom_y = generate_safety_domain(own_x, own_y, own_crs, length=50.0)
+            dom_fill_col = "rgba(16, 185, 129, 0.08)" if min_now > 250 else ("rgba(245, 158, 11, 0.14)" if min_now > 90 else "rgba(239, 68, 68, 0.20)")
+            dom_line_col = "#10b981" if min_now > 250 else ("#f59e0b" if min_now > 90 else "#ef4444")
+            fig.add_trace(go.Scatter(
+                x=dom_x, y=dom_y,
+                mode="lines",
+                fill="toself",
+                fillcolor=dom_fill_col,
+                line=dict(color=dom_line_col, width=1.5, dash="dash"),
+                name="Protective Safety Buffer",
+                hoverinfo="text",
+                text=["TwinGuard Certified Safety Zone"] * len(dom_x)
+            ))
+
+            if show_fan and aud_rec and "counterfactual_summary" in aud_rec:
+                c_sum = aud_rec.get("counterfactual_summary")
+                if c_sum and "rollouts" in c_sum:
+                    for k, ro in enumerate(c_sum["rollouts"][:6]):
+                        traj = ro.get("own_trajectory", [])
+                        if len(traj) > 1:
+                            rx = [pt[0] for pt in traj]
+                            ry = [pt[1] for pt in traj]
+                            fan_col = "rgba(239, 68, 68, 0.55)" if ro.get("collision_occurred") else ("rgba(245, 158, 11, 0.50)" if ro.get("domain_violation_occurred") else "rgba(56, 189, 248, 0.45)")
+                            fig.add_trace(go.Scatter(
+                                x=rx, y=ry,
+                                mode="lines",
+                                line=dict(color=fan_col, width=2, dash="dot"),
+                                name="Rollout Fan (Ghost Futures)" if k == 0 else None,
+                                hoverinfo="text",
+                                text=[f"What-If Future #{k+1} | Clearance: {ro.get('min_distance', 0):.0f}m"] * len(rx),
+                                showlegend=(k == 0)
+                            ))
+
+            own_past_x = [p["own_x"] for p in past_history]
+            own_past_y = [p["own_y"] for p in past_history]
+            fig.add_trace(go.Scatter(
+                x=own_past_x, y=own_past_y,
+                mode="lines",
+                name="Our Ship Track",
+                line=dict(color="#00d2ff", width=3.5)
+            ))
+
+            hull_x, hull_y = generate_ship_hull(own_x, own_y, own_crs, length=120.0, beam=34.0)
+            fig.add_trace(go.Scatter(
+                x=hull_x, y=hull_y,
+                mode="lines",
+                fill="toself",
+                fillcolor="#0284c7",
+                line=dict(color="#ffffff", width=2.5),
+                name="Our Autonomous Vessel",
+                hoverinfo="text",
+                text=[f"Our Ship | Speed: {own_spd:.1f} m/s | Heading: {own_crs_deg}°"] * len(hull_x)
+            ))
+
+            target_colors = ["#f43f5e", "#fb923c", "#ec4899"]
+            if curr_state["targets"]:
+                for i, tgt in enumerate(curr_state["targets"]):
+                    tid = tgt["id"]
+                    t_col = target_colors[i % len(target_colors)]
+                    t_x, t_y = tgt["x"], tgt["y"]
+                    t_crs = tgt.get("course", np.pi)
+                    t_spd = tgt.get("speed", 7.0)
+
+                    t_wake_x, t_wake_y = generate_ship_wake(t_x, t_y, t_crs, t_spd, length=110.0)
+                    fig.add_trace(go.Scatter(
+                        x=t_wake_x, y=t_wake_y,
+                        mode="lines",
+                        line=dict(color="rgba(255, 255, 255, 0.28)", width=2),
+                        hoverinfo="none",
+                        showlegend=False
+                    ))
+
+                    t_past_x = [next(t["x"] for t in p["targets"] if t["id"] == tid) for p in past_history]
+                    t_past_y = [next(t["y"] for t in p["targets"] if t["id"] == tid) for p in past_history]
+                    fig.add_trace(go.Scatter(
+                        x=t_past_x, y=t_past_y,
+                        mode="lines",
+                        name=f"Other Ship {i+1} Track",
+                        line=dict(color=t_col, width=2.5, dash="dash")
+                    ))
+
+                    t_hull_x, t_hull_y = generate_ship_hull(t_x, t_y, t_crs, length=115.0, beam=32.0)
+                    fig.add_trace(go.Scatter(
+                        x=t_hull_x, y=t_hull_y,
+                        mode="lines",
+                        fill="toself",
+                        fillcolor=t_col,
+                        line=dict(color="#ffffff", width=2),
+                        name=f"Other Vessel {i+1}",
+                        hoverinfo="text",
+                        text=[f"Target {i+1} | Speed: {t_spd:.1f} m/s | Heading: {int(np.rad2deg(t_crs))%360}°"] * len(t_hull_x)
+                    ))
+
+            fig.update_layout(
+                title=dict(
+                    text=f"🌊 Marine Electronic Chart Display (ECDIS) — Ocean Time: <b>T+{frame_idx + 1}s</b>",
+                    font=dict(color="#f8fafc", size=15)
+                ),
+                xaxis=dict(
+                    title="West <--- Nautical Distance (Meters) ---> East",
+                    gridcolor="rgba(14, 116, 144, 0.18)",
+                    zerolinecolor="rgba(56, 189, 248, 0.3)",
+                    range=[-3200, 3200]
+                ),
+                yaxis=dict(
+                    title="South <--- Nautical Distance (Meters) ---> North",
+                    gridcolor="rgba(14, 116, 144, 0.18)",
+                    zerolinecolor="rgba(56, 189, 248, 0.3)",
+                    range=[-1200, 2400]
+                ),
+                plot_bgcolor="#06182c",
+                paper_bgcolor="#030f1c",
+                height=600,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1,
+                    bgcolor="rgba(7, 23, 43, 0.75)",
+                    bordercolor="rgba(56, 189, 248, 0.2)",
+                    borderwidth=1
+                )
             )
-        )
-        fig.update_yaxes(scaleanchor="x", scaleratio=1)
-        st.plotly_chart(fig, use_container_width=True)
+            fig.update_yaxes(scaleanchor="x", scaleratio=1)
+            st.plotly_chart(fig, use_container_width=True)
 
-        # Copilot Explanation Box
-        st.markdown(
-            f"<div class='rule-card' style='border-left: 5px solid {dec_badge_col};'>"
-            f"<strong>TwinGuard Safety Copilot Audit at Second {frame_idx + 1}:</strong><br>"
-            f"- <strong>Decision:</strong> <span style='color:{dec_badge_col}; font-weight:bold;'>{decision_label}</span><br>"
-            f"- <strong>Statistical Risk Bound:</strong> {risk_bound:.2f} (Safety Limit: 0.35)<br>"
-            f"- <strong>Action Reason:</strong> {action_reason}"
-            f"</div>",
-            unsafe_allow_html=True
-        )
+            st.markdown(
+                f"<div class='rule-card' style='border-left: 5px solid {dec_badge_col};'>"
+                f"<strong>TwinGuard Safety Copilot Audit at Second {frame_idx + 1}:</strong><br>"
+                f"- <strong>Decision:</strong> <span style='color:{dec_badge_col}; font-weight:bold;'>{decision_label}</span><br>"
+                f"- <strong>Statistical Risk Bound:</strong> {risk_bound:.2f} (Safety Limit: 0.35)<br>"
+                f"- <strong>Action Reason:</strong> {action_reason}"
+                f"</div>",
+                unsafe_allow_html=True
+            )
 
     with col_controls:
         st.markdown("---")
