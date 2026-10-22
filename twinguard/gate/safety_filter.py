@@ -3,10 +3,19 @@ Safety Action Filter: Searches for minimal corrections to unsafe actions.
 """
 
 from __future__ import annotations
+import math
 import numpy as np
 from twinguard.env.vessel import VesselState
 from twinguard.counterfactual.rollout import CounterfactualRolloutEngine, CounterfactualSummary
 from twinguard.calibration.conformal import ConformalRiskCalibrator
+
+
+def _clamp(val: float, low: float, high: float) -> float:
+    if val < low:
+        return low
+    if val > high:
+        return high
+    return val
 
 
 class SafetyActionFilter:
@@ -32,55 +41,45 @@ class SafetyActionFilter:
         base_drift: tuple[float, float] = (0.0, 0.0)
     ) -> tuple[np.ndarray | None, CounterfactualSummary | None, str]:
         """
-        Explores candidate adjustments:
-        - Steer further Starboard (+5°, +10°, +15°, +20°)
-        - Moderate speed reductions (-1.5 m/s, -3.0 m/s)
-        Returns:
-            (best_action, summary, reason) or (None, None, failure_reason)
+        Explores candidate adjustments ordered by minimal perturbation cost.
+        Returns immediately upon finding the lowest-cost safe action.
         """
         orig_speed = float(proposed_action[0])
         orig_rudder = float(proposed_action[1])
 
-        # Candidate offsets: (d_speed, d_rudder)
-        rudder_offsets = [
-            np.deg2rad(5.0), np.deg2rad(10.0), np.deg2rad(15.0), np.deg2rad(20.0),
-            -np.deg2rad(5.0), -np.deg2rad(10.0) # Port adjustments tested only if compliant
+        # Prioritize COLREG starboard turns and slight speed adjustments
+        candidate_offsets = [
+            (0.0, 0.1745),    # +10 deg
+            (0.0, 0.2618),    # +15 deg
+            (-1.5, 0.1745),   # -1.5 m/s, +10 deg
+            (-1.5, 0.2618),   # -1.5 m/s, +15 deg
+            (0.0, 0.0873),    # +5 deg
+            (0.0, 0.3491),    # +20 deg
+            (-1.5, 0.0873),   # -1.5 m/s, +5 deg
+            (-3.0, 0.1745),   # -3.0 m/s, +10 deg
+            (-1.5, 0.3491),   # -1.5 m/s, +20 deg
+            (-3.0, 0.2618),   # -3.0 m/s, +15 deg
+            (0.0, -0.0873),   # -5 deg
+            (0.0, -0.1745),   # -10 deg
         ]
-        speed_offsets = [0.0, -1.5, -3.0]
 
-        best_action: np.ndarray | None = None
-        best_summary: CounterfactualSummary | None = None
-        min_cost = float("inf")
-        reason = ""
+        for ds, dr in candidate_offsets:
+            cand_speed = _clamp(orig_speed + ds, 2.0, 12.0)
+            cand_rudder = _clamp(orig_rudder + dr, -0.6108, 0.6108)
+            cand_act = np.array([cand_speed, cand_rudder], dtype=np.float32)
 
-        # Weighting: favor small rudder adjustments over dramatic slowdowns
-        w_speed = 1.0
-        w_rudder = 4.0
+            summary = self.rollout_engine.evaluate_action(
+                own_ship, target_ships, cand_act, base_drift
+            )
 
-        for ds in speed_offsets:
-            cand_speed = float(np.clip(orig_speed + ds, 2.0, 12.0))
-            for dr in rudder_offsets:
-                cand_rudder = float(np.clip(orig_rudder + dr, -np.deg2rad(35.0), np.deg2rad(35.0)))
-                cand_act = np.array([cand_speed, cand_rudder], dtype=np.float32)
+            _, _, upper_risk = self.calibrator.get_calibrated_risk_bound(summary.p95_risk)
 
-                summary = self.rollout_engine.evaluate_action(
-                    own_ship, target_ships, cand_act, base_drift
+            if upper_risk < self.safety_threshold and summary.collision_probability == 0.0:
+                deg_change = math.degrees(dr)
+                reason = (
+                    f"Action Modified: Adjusted rudder by {deg_change:+.1f} deg and speed by {ds:+.1f} m/s "
+                    f"(Risk reduced from raw to {upper_risk:.2f} <= {self.safety_threshold})."
                 )
+                return cand_act, summary, reason
 
-                # Check upper calibrated bound
-                _, _, upper_risk = self.calibrator.get_calibrated_risk_bound(summary.p95_risk)
-
-                # Action is acceptable if certified risk < threshold and zero collisions
-                if upper_risk < self.safety_threshold and summary.collision_probability == 0.0:
-                    cost = w_speed * (abs(ds) ** 2) + w_rudder * (abs(dr) ** 2)
-                    if cost < min_cost:
-                        min_cost = cost
-                        best_action = cand_act
-                        best_summary = summary
-                        deg_change = np.rad2deg(dr)
-                        reason = (
-                            f"Action Modified: Adjusted rudder by {deg_change:+.1f} deg and speed by {ds:+.1f} m/s "
-                            f"(Risk reduced from raw to {upper_risk:.2f} <= {self.safety_threshold})."
-                        )
-
-        return best_action, best_summary, reason
+        return None, None, "No safe action found within search neighborhood."

@@ -3,6 +3,7 @@ Ship Domain Modelling and Violation Detection (Fujii and Goodwin Models).
 """
 
 from __future__ import annotations
+import math
 import numpy as np
 from twinguard.env.vessel import VesselState
 
@@ -41,9 +42,8 @@ class ShipDomain:
         dy = target_ship.y - own_ship.y
 
         # Rotate into own-ship body frame
-        # psi is clockwise from North: 0 rad is +y (bow), pi/2 rad is +x (starboard)
-        cos_psi = np.cos(own_ship.course)
-        sin_psi = np.sin(own_ship.course)
+        cos_psi = math.cos(own_ship.course)
+        sin_psi = math.sin(own_ship.course)
 
         # Body coordinates: x_b = starboard (+), y_b = fore/bow (+)
         x_body = dx * cos_psi - dy * sin_psi
@@ -57,7 +57,7 @@ class ShipDomain:
 
         # Ellipse normalized equation: (x/b)^2 + (y/a)^2
         val = (x_body / max(b, 1.0)) ** 2 + (y_body / max(a, 1.0)) ** 2
-        domain_ratio = float(np.sqrt(val))
+        domain_ratio = math.sqrt(val)
 
         is_violated = domain_ratio < 1.0
         return is_violated, domain_ratio
@@ -68,25 +68,27 @@ class ShipDomain:
         """
         thetas = np.linspace(0, 2 * np.pi, num_points)
         L = own_ship.length
-        pts = []
 
+        xs_body = []
+        ys_body = []
+        for theta in thetas:
+            dx_unit = np.sin(theta)
+            dy_unit = np.cos(theta)
+
+            a = (self.k_fore * L) if dy_unit >= 0 else (self.k_aft * L)
+            b = (self.k_stbd * L) if dx_unit >= 0 else (self.k_port * L)
+
+            xs_body.append(b * dx_unit)
+            ys_body.append(a * dy_unit)
+
+        xs_b = np.array(xs_body)
+        ys_b = np.array(ys_body)
+
+        # Rotate back to world frame
         cos_psi = np.cos(own_ship.course)
         sin_psi = np.sin(own_ship.course)
 
-        for th in thetas:
-            # Check quadrant in body frame
-            stbd = np.cos(th) >= 0
-            fore = np.sin(th) >= 0
+        x_world = own_ship.x + (xs_b * cos_psi + ys_b * sin_psi)
+        y_world = own_ship.y + (-xs_b * sin_psi + ys_b * cos_psi)
 
-            b = (self.k_stbd * L) if stbd else (self.k_port * L)
-            a = (self.k_fore * L) if fore else (self.k_aft * L)
-
-            xb = b * np.cos(th)
-            yb = a * np.sin(th)
-
-            # Rotate back to world frame
-            xw = own_ship.x + xb * cos_psi + yb * sin_psi
-            yw = own_ship.y - xb * sin_psi + yb * cos_psi
-            pts.append([xw, yw])
-
-        return np.array(pts)
+        return np.column_stack([x_world, y_world])

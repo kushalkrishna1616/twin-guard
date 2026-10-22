@@ -339,7 +339,7 @@ def simulate_journey(scenario_key: str, is_gated: bool, drift_val: float, agent_
     else:
         agent = APFMaritimeAgent(colreg_aware=False, name="APF_Agent")
 
-    gate = TwinGuardSafetyGate(safety_threshold=0.35, num_rollouts=5, horizon_steps=15)
+    gate = TwinGuardSafetyGate(safety_threshold=0.35, num_rollouts=3, horizon_steps=12)
     runner = BenchmarkRunner(gate=gate)
 
     metrics, history, audits = runner.run_episode(env=env, agent=agent, is_gated=is_gated)

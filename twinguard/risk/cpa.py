@@ -3,6 +3,7 @@ Closest Point of Approach (DCPA and TCPA) Calculations for Maritime Navigation.
 """
 
 from __future__ import annotations
+import math
 import numpy as np
 
 
@@ -15,29 +16,26 @@ def compute_dcpa_tcpa(
     """
     Computes Distance at Closest Point of Approach (DCPA in meters)
     and Time to Closest Point of Approach (TCPA in seconds).
-
-    Positive TCPA means ships are closing in towards CPA.
-    Negative TCPA means ships are diverging (already passed CPA).
+    Optimized for high-throughput scalar calculation.
     """
-    rel_pos = target_pos - own_pos
-    rel_vel = target_vel - own_vel
+    rx = float(target_pos[0] - own_pos[0])
+    ry = float(target_pos[1] - own_pos[1])
+    vx = float(target_vel[0] - own_vel[0])
+    vy = float(target_vel[1] - own_vel[1])
 
-    rel_speed_sq = float(np.dot(rel_vel, rel_vel))
+    rel_speed_sq = vx * vx + vy * vy
 
-    # If relative speed is negligible, DCPA is current distance, TCPA is inf
     if rel_speed_sq < 1e-6:
-        dcpa = float(np.linalg.norm(rel_pos))
+        dcpa = math.hypot(rx, ry)
         tcpa = float("inf")
         return dcpa, tcpa
 
-    # TCPA formula: - (p_rel . v_rel) / |v_rel|^2
-    tcpa = -float(np.dot(rel_pos, rel_vel)) / rel_speed_sq
+    dot_pv = rx * vx + ry * vy
+    tcpa = -dot_pv / rel_speed_sq
 
-    if tcpa <= 0:
-        # Ships are already diverging; closest distance was or is now
-        dcpa = float(np.linalg.norm(rel_pos))
-    else:
-        pos_at_cpa = rel_pos + rel_vel * tcpa
-        dcpa = float(np.linalg.norm(pos_at_cpa))
+    # CPA position relative to own ship
+    cpa_x = rx + vx * tcpa
+    cpa_y = ry + vy * tcpa
+    dcpa = math.hypot(cpa_x, cpa_y)
 
     return dcpa, tcpa
