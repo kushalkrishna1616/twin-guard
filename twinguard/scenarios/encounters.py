@@ -20,6 +20,7 @@ class ScenarioConfig:
     goal_position: np.ndarray  # [x, y] in meters
     max_steps: int = 150
     dt: float = 1.0
+    static_obstacles: list[tuple[float, float, float]] = field(default_factory=list)
 
 
 def create_head_on_scenario(distance: float = 1200.0, speed: float = 8.0) -> ScenarioConfig:
@@ -244,10 +245,51 @@ def create_multi_vessel_scenario() -> ScenarioConfig:
     )
 
 
+
+def create_island_channel_scenario() -> ScenarioConfig:
+    """
+    Restricted Channel with Island / Coral Reef Barrier and Crossing Vessel.
+    Navigating narrow strait while avoiding grounding and crossing ship.
+    """
+    own_ship = VesselState(
+        id="own_ship",
+        x=0.0,
+        y=0.0,
+        speed=7.5,
+        course=0.0,
+        length=50.0,
+        beam=10.0
+    )
+
+    crossing_target = VesselState(
+        id="target_channel_cross",
+        x=800.0,
+        y=650.0,
+        speed=6.5,
+        course=3 * np.pi / 2, # West
+        length=55.0,
+        beam=11.0
+    )
+
+    # Island at (150m, 500m) with 110m radius reef
+    obstacles = [(180.0, 520.0, 110.0), (-250.0, 850.0, 80.0)]
+
+    return ScenarioConfig(
+        name="Narrow Strait with Rocky Island & Reef",
+        description="Restricted navigation channel flanked by a rocky island barrier and an oncoming crossing vessel.",
+        own_ship=own_ship,
+        target_ships=[crossing_target],
+        goal_position=np.array([0.0, 1400.0]),
+        max_steps=200,
+        dt=1.0,
+        static_obstacles=obstacles
+    )
+
 SCENARIO_BUILDERS = {
     "head_on": create_head_on_scenario,
     "crossing_give_way": lambda: create_crossing_scenario(own_is_give_way=True),
     "crossing_stand_on": lambda: create_crossing_scenario(own_is_give_way=False),
     "overtaking": create_overtaking_scenario,
     "multi_vessel": create_multi_vessel_scenario,
+    "island_channel": create_island_channel_scenario,
 }

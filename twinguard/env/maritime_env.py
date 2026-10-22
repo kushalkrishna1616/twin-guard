@@ -69,6 +69,7 @@ class MaritimeEnv(gym.Env):
         self.own_ship: VesselState = self.scenario_config.own_ship.copy()
         self.target_ships: list[VesselState] = [t.copy() for t in self.scenario_config.target_ships]
         self.goal_position: np.ndarray = np.array(self.scenario_config.goal_position, dtype=np.float64)
+        self.static_obstacles = getattr(self.scenario_config, 'static_obstacles', [])
 
         self.current_step = 0
         self.min_distance_overall = float("inf")
@@ -144,6 +145,17 @@ class MaritimeEnv(gym.Env):
             if not rep.colreg_compliant:
                 step_colreg_viol = True
 
+
+        # Check static obstacles / reef grounding
+        for (ox, oy, orad) in self.static_obstacles:
+            d_obs = float(np.hypot(self.own_ship.x - ox, self.own_ship.y - oy))
+            if d_obs < step_min_dist:
+                step_min_dist = d_obs
+            if d_obs < (self.own_ship.length / 2.0 + orad):
+                step_collision = True
+            elif d_obs < (orad + 100.0):
+                step_domain_viol = True
+
         if step_min_dist < self.min_distance_overall:
             self.min_distance_overall = step_min_dist
 
@@ -196,7 +208,8 @@ class MaritimeEnv(gym.Env):
                     "course": float(t.course)
                 }
                 for t in self.target_ships
-            ]
+            ],
+            "static_obstacles": list(self.static_obstacles)
         })
 
     def _get_obs(self) -> np.ndarray:

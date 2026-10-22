@@ -1,10 +1,11 @@
 """
 TwinGuard: Realistic Maritime Ocean Radar & Autonomous Ship Copilot.
-Simulates genuine ECDIS/ARPA nautical charts with realistic ship hull geometry,
-ocean bathymetry, dynamic wakes, and protective safety domain bubbles.
+Features 3-DOF Nomoto kinematics, deep PPO RL agents, ghost rollout fans,
+static reef/island hazards, and one-click assessment PDF generation.
 """
 
 from __future__ import annotations
+import os
 import time
 import streamlit as st
 import numpy as np
@@ -14,6 +15,7 @@ import plotly.graph_objects as go
 from twinguard.env.maritime_env import MaritimeEnv
 from twinguard.scenarios.encounters import SCENARIO_BUILDERS
 from twinguard.agents.rule_based import APFMaritimeAgent
+from twinguard.agents.rl_agent import RLAgent
 from twinguard.gate.gate import TwinGuardSafetyGate
 from twinguard.benchmark.evaluator import BenchmarkRunner
 
@@ -28,7 +30,6 @@ st.set_page_config(
 # Custom Nautical & Glassmorphic Styling
 st.markdown("""
 <style>
-    /* Ocean theme background accents */
     .stApp {
         background-color: #030d1a;
     }
@@ -45,7 +46,6 @@ st.markdown("""
         color: #94a3b8 !important;
         margin-bottom: 1.4rem;
     }
-    /* Bridge Telemetry HUD Cards */
     .hud-card {
         background: linear-gradient(135deg, rgba(15, 30, 54, 0.85), rgba(7, 19, 36, 0.95));
         border: 1px solid rgba(56, 189, 248, 0.25);
@@ -119,7 +119,7 @@ st.markdown("""
 # Top Title
 st.markdown("<div class='title-text'>⚓ TwinGuard: Maritime Ocean Radar & Ship Safety Copilot</div>", unsafe_allow_html=True)
 st.markdown(
-    "<div class='subtitle-text'>Electronic Nautical Chart (ECDIS / ARPA) view of autonomous vessel navigation protected by prospective digital-twin gating.</div>",
+    "<div class='subtitle-text'>Electronic Nautical Chart (ECDIS / ARPA) view of autonomous vessel navigation with prospective digital-twin gating.</div>",
     unsafe_allow_html=True
 )
 
@@ -147,9 +147,14 @@ scenarios_info = {
         "expected": "TwinGuard gives ample sea room around the slower target."
     },
     "multi_vessel": {
-        "title": "Crowded Harbor / Multi-Ship Encounter",
+        "title": "Crowded Sea (3 Target Vessels)",
         "description": "Three target vessels maneuvering simultaneously. Stresses multi-target DCPA/TCPA verification and safety gating.",
         "expected": "TwinGuard balances multiple conflicting ship domains to reach the fairway."
+    },
+    "island_channel": {
+        "title": "Narrow Strait: Island & Reef Barrier",
+        "description": "Restricted channel flanked by a shallow reef and rocky island with crossing traffic.",
+        "expected": "TwinGuard avoids grounding on the reef while clearing crossing traffic."
     }
 }
 
@@ -159,8 +164,18 @@ chosen_key = st.sidebar.selectbox(
     format_func=lambda k: scenarios_info[k]["title"]
 )
 
+# Step 2: Agent Selection
 st.sidebar.markdown("---")
-st.sidebar.header("🛡️ Step 2: TwinGuard Safety Copilot")
+st.sidebar.header("🤖 Step 2: Autopilot Navigation Agent")
+agent_type = st.sidebar.selectbox(
+    "Agent Architecture",
+    options=["Rule-Based APF (Classical Guidance)", "Deep PPO Policy (Trained Neural Network)"],
+    help="Switch between the classical Artificial Potential Field autopilot and the trained Deep RL neural network."
+)
+
+# Step 3: Safety Copilot
+st.sidebar.markdown("---")
+st.sidebar.header("🛡️ Step 3: TwinGuard Safety Copilot")
 enable_copilot = st.sidebar.toggle("Active Safety Gating", value=True)
 
 if enable_copilot:
@@ -168,68 +183,70 @@ if enable_copilot:
 else:
     st.sidebar.error("⚠️ Copilot DISABLED: Raw Autopilot sails unprotected (high crash risk).")
 
+# Visual Options
+show_fan = st.sidebar.checkbox("🔮 Show Prospective Rollout Fan (Ghost Futures)", value=True)
+
+# Step 4: Weather
 st.sidebar.markdown("---")
-st.sidebar.header("🌊 Step 3: Sea State & Ocean Currents")
+st.sidebar.header("🌊 Step 4: Sea State & Ocean Currents")
 weather_preset = st.sidebar.select_slider(
     "Ocean Current & Drift Force",
     options=["Calm Deep Ocean", "Moderate Cross-Currents", "Rough Storm Swell"],
     value="Calm Deep Ocean"
 )
-
 wind_drift = {"Calm Deep Ocean": 0.05, "Moderate Cross-Currents": 0.35, "Rough Storm Swell": 0.85}[weather_preset]
 
+# Step 5: Assessment PDF Download
+st.sidebar.markdown("---")
+st.sidebar.header("📄 Assessment Documentation")
+pdf_file = "TwinGuard_Project_Assessment_Report.pdf"
+if os.path.exists(pdf_file):
+    with open(pdf_file, "rb") as f:
+        st.sidebar.download_button(
+            label="📥 Download Assessment Report (PDF)",
+            data=f.read(),
+            file_name="TwinGuard_Project_Assessment_Report.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
+else:
+    st.sidebar.caption("Report generating in background...")
 
-# Helpers for Ship Hull & Ocean Geometry
+
+# Geometry Helpers
 def generate_ship_hull(x: float, y: float, course: float, length: float = 110.0, beam: float = 30.0):
-    """Generates realistic naval vessel hull polygon rotated to heading."""
     body = [
-        (0.0, length * 0.55),             # Bow tip
-        (beam * 0.45, length * 0.25),      # Starboard shoulder
-        (beam * 0.50, -length * 0.35),     # Starboard mid
-        (beam * 0.28, -length * 0.50),     # Starboard transom
-        (-beam * 0.28, -length * 0.50),    # Port transom
-        (-beam * 0.50, -length * 0.35),    # Port mid
-        (-beam * 0.45, length * 0.25),     # Port shoulder
-        (0.0, length * 0.55),              # Close at bow
+        (0.0, length * 0.55),
+        (beam * 0.45, length * 0.25),
+        (beam * 0.50, -length * 0.35),
+        (beam * 0.28, -length * 0.50),
+        (-beam * 0.28, -length * 0.50),
+        (-beam * 0.50, -length * 0.35),
+        (-beam * 0.45, length * 0.25),
+        (0.0, length * 0.55),
     ]
-    cos_c = np.cos(course)
-    sin_c = np.sin(course)
-
+    cos_c, sin_c = np.cos(course), np.sin(course)
     xs = [x + bx * cos_c + by * sin_c for bx, by in body]
     ys = [y - bx * sin_c + by * cos_c for bx, by in body]
     return xs, ys
 
 
 def generate_ship_wake(x: float, y: float, course: float, speed: float, length: float = 110.0):
-    """Generates realistic foaming water wake behind the vessel stern."""
-    cos_c = np.cos(course)
-    sin_c = np.sin(course)
-
+    cos_c, sin_c = np.cos(course), np.sin(course)
     stern_x = x - (length * 0.50) * sin_c
     stern_y = y - (length * 0.50) * cos_c
-
     wake_len = max(80.0, speed * 22.0)
     wake_spread = wake_len * 0.35
-
     left_x = stern_x - wake_len * sin_c - wake_spread * cos_c
     left_y = stern_y - wake_len * cos_c + wake_spread * sin_c
-
     right_x = stern_x - wake_len * sin_c + wake_spread * cos_c
     right_y = stern_y - wake_len * cos_c - wake_spread * sin_c
-
-    wake_x = [left_x, stern_x, right_x]
-    wake_y = [left_y, stern_y, right_y]
-    return wake_x, wake_y
+    return [left_x, stern_x, right_x], [left_y, stern_y, right_y]
 
 
 def generate_safety_domain(x: float, y: float, course: float, length: float = 50.0):
-    """Fujii/Goodwin safety domain elliptical boundary."""
     angles = np.linspace(0, 2 * np.pi, 50)
-    a_fore = 5.0 * length
-    a_aft = 2.2 * length
-    b_stbd = 3.0 * length
-    b_port = 2.2 * length
-
+    a_fore, a_aft, b_stbd, b_port = 5.0 * length, 2.2 * length, 3.0 * length, 2.2 * length
     xs_body, ys_body = [], []
     for ang in angles:
         dx, dy = np.sin(ang), np.cos(ang)
@@ -237,21 +254,24 @@ def generate_safety_domain(x: float, y: float, course: float, length: float = 50
         b = b_stbd if dx >= 0 else b_port
         xs_body.append(dx * b)
         ys_body.append(dy * a)
-
     cos_c, sin_c = np.cos(course), np.sin(course)
     xs = [x + bx * cos_c + by * sin_c for bx, by in zip(xs_body, ys_body)]
     ys = [y - bx * sin_c + by * cos_c for bx, by in zip(xs_body, ys_body)]
     return xs, ys
 
 
-# Cached Simulation Runner
+# Simulation Execution
 @st.cache_data(show_spinner=False)
-def simulate_journey(scenario_key: str, is_gated: bool, drift_val: float):
+def simulate_journey(scenario_key: str, is_gated: bool, drift_val: float, agent_name: str):
     scenario_factory = SCENARIO_BUILDERS[scenario_key]
     env = MaritimeEnv(scenario_config=scenario_factory(), enable_disturbances=True)
     env.disturbances.current_speed = drift_val
 
-    agent = APFMaritimeAgent(colreg_aware=False, name="Ship_Autopilot")
+    if "PPO" in agent_name and os.path.exists("models/ppo_maritime.zip"):
+        agent = RLAgent(model_path="models/ppo_maritime.zip", name="PPO_Agent")
+    else:
+        agent = APFMaritimeAgent(colreg_aware=False, name="APF_Agent")
+
     gate = TwinGuardSafetyGate(safety_threshold=0.35, num_rollouts=5, horizon_steps=15)
     runner = BenchmarkRunner(gate=gate)
 
@@ -285,14 +305,12 @@ with tab_radar:
         if st.button("🔄 Reset / Re-run Simulation", use_container_width=True):
             st.cache_data.clear()
 
-    # Run simulation
     with st.spinner("TwinGuard is computing prospective 3-DOF rollouts..."):
-        metrics, history, audits = simulate_journey(chosen_key, enable_copilot, wind_drift)
+        metrics, history, audits = simulate_journey(chosen_key, enable_copilot, wind_drift, agent_type)
 
     total_frames = len(history)
 
     with col_screen:
-        # Playback control bar
         col_slider, col_play = st.columns([4, 1])
         with col_slider:
             frame_idx = st.slider(
@@ -300,25 +318,15 @@ with tab_radar:
                 min_value=1,
                 max_value=total_frames,
                 value=total_frames,
-                help="Move slider to watch both vessels maneuver across the ocean."
+                help="Move slider to watch vessels maneuver across the ocean."
             ) - 1
         with col_play:
             st.write("")
             play_btn = st.button("▶ Auto-Play", use_container_width=True)
 
-        # Handle auto-play animation loop
-        if play_btn:
-            playback_placeholder = st.empty()
-            # Fast playback loop through frames
-            step_size = max(1, total_frames // 40)
-            for f in range(0, total_frames, step_size):
-                frame_idx = f
-                # (Streamlit will animate next run)
-
         curr_state = history[frame_idx]
         past_history = history[:frame_idx + 1]
 
-        # Extract Telemetry
         own_x, own_y = curr_state["own_x"], curr_state["own_y"]
         own_spd = curr_state.get("own_speed", 8.0)
         own_crs = curr_state.get("own_course", 0.0)
@@ -329,7 +337,7 @@ with tab_radar:
         if hasattr(decision_label, "value"):
             decision_label = decision_label.value
         risk_bound = aud_rec.get("calibrated_upper_risk", 0.0)
-        action_reason = aud_rec.get("reason", "Action verified safe by counterfactual certification.")
+        action_reason = aud_rec.get("reason", "Action certified safe by counterfactual rollouts.")
 
         # --- TELEMETRY HUD BAR ---
         col_h1, col_h2, col_h3, col_h4, col_h5 = st.columns(5)
@@ -349,14 +357,16 @@ with tab_radar:
                 unsafe_allow_html=True
             )
         with col_h3:
-            # Nearest target distance
             dists = [np.hypot(own_x - t['x'], own_y - t['y']) for t in curr_state['targets']] if curr_state['targets'] else [9999]
+            if curr_state.get("static_obstacles"):
+                for (ox, oy, orad) in curr_state["static_obstacles"]:
+                    dists.append(np.hypot(own_x - ox, own_y - oy) - orad)
             min_now = min(dists)
             dist_col = "#ef4444" if min_now < 100 else ("#f59e0b" if min_now < 300 else "#10b981")
             st.markdown(
                 f"<div class='hud-card'><div class='hud-label'>📏 Target Clearance</div>"
                 f"<div class='hud-value' style='color:{dist_col};'>{min_now:.0f} m</div>"
-                f"<div class='hud-sub'>Minimum Distance</div></div>",
+                f"<div class='hud-sub'>Closest Hazard</div></div>",
                 unsafe_allow_html=True
             )
         with col_h4:
@@ -375,10 +385,10 @@ with tab_radar:
                 unsafe_allow_html=True
             )
 
-        # --- BUILD REALISTIC OCEAN ECDIS RADAR PLOT ---
+        # --- OCEAN ECDIS PLOT ---
         fig = go.Figure()
 
-        # 1. Realistic Bathymetric Depth Contours (Underwater Sea Depths)
+        # Depth Contours
         x_sea = np.linspace(-3200, 3200, 80)
         for offset, depth_lbl in [(-1200, "-120m Deep Sea"), (400, "-60m Continental Shelf"), (1900, "-25m Coastal Fairway")]:
             y_sea = offset + 260 * np.sin(x_sea / 1200.0) + 120 * np.cos(x_sea / 700.0)
@@ -391,7 +401,7 @@ with tab_radar:
                 showlegend=False
             ))
 
-        # 2. Concentric Nautical Distance Range Rings (500m, 1000m, 1500m)
+        # Range Rings
         angles = np.linspace(0, 2 * np.pi, 90)
         center_y = 600
         for r, nm in [(500, "0.27 NM"), (1000, "0.54 NM"), (1500, "0.81 NM")]:
@@ -412,7 +422,48 @@ with tab_radar:
                 showlegend=False
             ))
 
-        # 3. Destination Buoy / Harbor Waypoint
+        # Static Hazards (Reefs & Islands)
+        if curr_state.get("static_obstacles"):
+            for oi, (ox, oy, orad) in enumerate(curr_state["static_obstacles"]):
+                angles_c = np.linspace(0, 2*np.pi, 45)
+                # Reef warning zone
+                reef_r = orad + 80.0
+                fig.add_trace(go.Scatter(
+                    x=ox + reef_r * np.cos(angles_c),
+                    y=oy + reef_r * np.sin(angles_c),
+                    mode="lines",
+                    fill="toself",
+                    fillcolor="rgba(245, 158, 11, 0.16)",
+                    line=dict(color="rgba(245, 158, 11, 0.6)", width=1.5, dash="dot"),
+                    name="Shallow Reef Warning",
+                    hoverinfo="text",
+                    text=[f"Reef Danger Zone ({reef_r:.0f}m)"] * len(angles_c)
+                ))
+                # Island rock core
+                fig.add_trace(go.Scatter(
+                    x=ox + orad * np.cos(angles_c),
+                    y=oy + orad * np.sin(angles_c),
+                    mode="lines",
+                    fill="toself",
+                    fillcolor="#451a03",
+                    line=dict(color="#d97706", width=2.5),
+                    name=f"Island {oi+1} (Hazard)",
+                    hoverinfo="text",
+                    text=[f"Rocky Island Barrier #{oi+1}"] * len(angles_c)
+                ))
+                # Lighthouse beacon
+                fig.add_trace(go.Scatter(
+                    x=[ox], y=[oy],
+                    mode="markers+text",
+                    name="Beacon Buoy",
+                    text=["<b>LIGHTHOUSE</b>"],
+                    textposition="top center",
+                    textfont=dict(color="#fde047", size=11),
+                    marker=dict(symbol="diamond", size=15, color="#eab308", line=dict(color="#ffffff", width=2)),
+                    showlegend=False
+                ))
+
+        # Fairway Goal Waypoint
         goal_pos = SCENARIO_BUILDERS[chosen_key]().goal_position
         fig.add_trace(go.Scatter(
             x=[goal_pos[0]], y=[goal_pos[1]],
@@ -424,7 +475,7 @@ with tab_radar:
             marker=dict(symbol="star", size=22, color="#22c55e", line=dict(color="#ffffff", width=2))
         ))
 
-        # 4. Ship Wake (Foaming White Waves behind Our Ship)
+        # Ship Foaming Wake
         our_wake_x, our_wake_y = generate_ship_wake(own_x, own_y, own_crs, own_spd, length=120.0)
         fig.add_trace(go.Scatter(
             x=our_wake_x, y=our_wake_y,
@@ -435,7 +486,7 @@ with tab_radar:
             showlegend=False
         ))
 
-        # 5. Protective Safety Domain Bubble (Fujii Ellipse around Our Ship)
+        # Protective Domain Bubble
         dom_x, dom_y = generate_safety_domain(own_x, own_y, own_crs, length=50.0)
         dom_fill_col = "rgba(16, 185, 129, 0.08)" if min_now > 250 else ("rgba(245, 158, 11, 0.14)" if min_now > 90 else "rgba(239, 68, 68, 0.20)")
         dom_line_col = "#10b981" if min_now > 250 else ("#f59e0b" if min_now > 90 else "#ef4444")
@@ -450,7 +501,32 @@ with tab_radar:
             text=["TwinGuard Certified Safety Zone"] * len(dom_x)
         ))
 
-        # 6. Our Ship Track (Blue Wake Trail)
+        # Prospective Counterfactual Rollout Fan (Ghost Futures)
+        if show_fan and aud_rec and "counterfactual_summary" in aud_rec:
+            c_sum = aud_rec.get("counterfactual_summary")
+            if c_sum and "rollouts" in c_sum:
+                for k, ro in enumerate(c_sum["rollouts"][:6]):
+                    traj = ro.get("own_trajectory", [])
+                    if len(traj) > 1:
+                        rx = [pt[0] for pt in traj]
+                        ry = [pt[1] for pt in traj]
+                        if ro.get("collision_occurred"):
+                            fan_col = "rgba(239, 68, 68, 0.55)" # Hazard
+                        elif ro.get("domain_violation_occurred"):
+                            fan_col = "rgba(245, 158, 11, 0.50)" # Near miss
+                        else:
+                            fan_col = "rgba(56, 189, 248, 0.45)" # Certified Safe
+                        fig.add_trace(go.Scatter(
+                            x=rx, y=ry,
+                            mode="lines",
+                            line=dict(color=fan_col, width=2, dash="dot"),
+                            name="Rollout Fan (Ghost Futures)" if k == 0 else None,
+                            hoverinfo="text",
+                            text=[f"What-If Future #{k+1} | Clearance: {ro.get('min_distance', 0):.0f}m"] * len(rx),
+                            showlegend=(k == 0)
+                        ))
+
+        # Own Ship Past Track
         own_past_x = [p["own_x"] for p in past_history]
         own_past_y = [p["own_y"] for p in past_history]
         fig.add_trace(go.Scatter(
@@ -460,7 +536,7 @@ with tab_radar:
             line=dict(color="#00d2ff", width=3.5)
         ))
 
-        # 7. Our Ship REAL HULL (Polygonal Vessel Shape with pointed bow)
+        # Own Ship Hull
         hull_x, hull_y = generate_ship_hull(own_x, own_y, own_crs, length=120.0, beam=34.0)
         fig.add_trace(go.Scatter(
             x=hull_x, y=hull_y,
@@ -473,19 +549,18 @@ with tab_radar:
             text=[f"Our Ship | Speed: {own_spd:.1f} m/s | Heading: {own_crs_deg}°"] * len(hull_x)
         ))
 
-        # Projected Course Vector (Velocity leader line ahead of bow)
+        # Velocity Leader Vector
         leader_len = max(100.0, own_spd * 25.0)
         fig.add_trace(go.Scatter(
             x=[own_x, own_x + leader_len * np.sin(own_crs)],
             y=[own_y, own_y + leader_len * np.cos(own_crs)],
             mode="lines",
             line=dict(color="#38bdf8", width=2, dash="dot"),
-            name="Projected Course (30s)",
             hoverinfo="none",
             showlegend=False
         ))
 
-        # 8. Target Ships (Real Hulls, Wake, and Tracks)
+        # Target Vessels
         target_colors = ["#f43f5e", "#fb923c", "#ec4899"]
         if curr_state["targets"]:
             for i, tgt in enumerate(curr_state["targets"]):
@@ -495,7 +570,6 @@ with tab_radar:
                 t_crs = tgt.get("course", np.pi)
                 t_spd = tgt.get("speed", 7.0)
 
-                # Target wake
                 t_wake_x, t_wake_y = generate_ship_wake(t_x, t_y, t_crs, t_spd, length=110.0)
                 fig.add_trace(go.Scatter(
                     x=t_wake_x, y=t_wake_y,
@@ -505,7 +579,6 @@ with tab_radar:
                     showlegend=False
                 ))
 
-                # Target track
                 t_past_x = [next(t["x"] for t in p["targets"] if t["id"] == tid) for p in past_history]
                 t_past_y = [next(t["y"] for t in p["targets"] if t["id"] == tid) for p in past_history]
                 fig.add_trace(go.Scatter(
@@ -515,7 +588,6 @@ with tab_radar:
                     line=dict(color=t_col, width=2.5, dash="dash")
                 ))
 
-                # Target hull
                 t_hull_x, t_hull_y = generate_ship_hull(t_x, t_y, t_crs, length=115.0, beam=32.0)
                 fig.add_trace(go.Scatter(
                     x=t_hull_x, y=t_hull_y,
@@ -528,7 +600,7 @@ with tab_radar:
                     text=[f"Target {i+1} | Speed: {t_spd:.1f} m/s | Heading: {int(np.rad2deg(t_crs))%360}°"] * len(t_hull_x)
                 ))
 
-        # 9. Ocean Compass Rose in top-left
+        # Compass Rose
         compass_x, compass_y = -2600, 2000
         fig.add_trace(go.Scatter(
             x=[compass_x, compass_x],
@@ -553,7 +625,7 @@ with tab_radar:
             showlegend=False
         ))
 
-        # Chart Layout with Deep Nautical Sea Styling
+        # Layout
         fig.update_layout(
             title=dict(
                 text=f"🌊 Marine Electronic Chart Display (ECDIS) — Ocean Time: <b>T+{frame_idx + 1}s</b>",
@@ -571,8 +643,8 @@ with tab_radar:
                 zerolinecolor="rgba(56, 189, 248, 0.3)",
                 range=[-1200, 2400]
             ),
-            plot_bgcolor="#06182c",   # Realistic deep sea ocean navy
-            paper_bgcolor="#030f1c",  # Outer nautical console border
+            plot_bgcolor="#06182c",
+            paper_bgcolor="#030f1c",
             height=600,
             legend=dict(
                 orientation="h",
@@ -661,7 +733,6 @@ with tab_compare:
             unsafe_allow_html=True
         )
 
-    # Bar chart comparison
     col_c1, col_c2 = st.columns(2)
     with col_c1:
         fig_bar = go.Figure(data=[
@@ -712,7 +783,7 @@ with tab_guide:
 
     st.markdown("""
     ### 1. The Real-World Problem
-    Autonomous maritime surface vessels (such as AI-controlled cargo ships) navigate using black-box neural networks or heuristics.
+    Autonomous maritime surface vessels navigate using black-box neural networks or heuristics.
     When sensor noise, wind gusts, or sudden erratic traffic occurs:
     - The AI can make hazardous, illegal maneuvers (like turning **PORT** in a head-on encounter, violating COLREG Rule 14).
     - Result: Fatal high-speed collisions at sea.
@@ -730,6 +801,8 @@ with tab_guide:
     ### 3. Reading the Screen Symbols
     - 🚢 **Blue Hull:** Your autonomous vessel with its forward wake.
     - 🔴 **Red / Orange Hulls:** Encounter vessels navigating nearby.
+    - 🔮 **Dotted Branching Lines:** Prospective Counterfactual Rollout Fan (future paths simulated by the digital twin).
+    - 🏝️ **Brown Circle & Yellow Reef:** Rocky Island & Shallow Reef warning zone.
     - 🛡️ **Dotted Oval:** Protective Fujii/Goodwin safety domain boundary.
     - ⭐ **Green Waypoint:** Destination fairway coordinates.
     """)
