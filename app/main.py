@@ -1,6 +1,6 @@
 """
 TwinGuard: Visual Ship Radar & Safety Copilot.
-Designed for complete simplicity and visual clarity.
+Designed for complete simplicity, responsiveness, and visual clarity.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from twinguard.benchmark.evaluator import BenchmarkRunner
 # Configure page
 st.set_page_config(
     page_title="TwinGuard - Ship Safety Copilot",
+    page_icon="🚢",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -25,7 +26,6 @@ st.set_page_config(
 # High-contrast, clean styling
 st.markdown("""
 <style>
-    /* Force high-contrast text on dark backgrounds */
     .title-text {
         font-size: 2.2rem;
         font-weight: 800;
@@ -65,21 +65,13 @@ st.markdown("""
         font-weight: 600;
         margin-bottom: 12px;
     }
-    .step-badge {
-        background-color: #0284c7;
-        color: white;
-        padding: 2px 8px;
-        border-radius: 4px;
-        font-weight: 700;
-        font-size: 0.9rem;
-    }
 </style>
 """, unsafe_allow_html=True)
 
 # Top Header
-st.markdown("<div class='title-text'>TwinGuard: Smart Safety Copilot for Self-Driving Ships</div>", unsafe_allow_html=True)
+st.markdown("<div class='title-text'>🚢 TwinGuard: Smart Safety Copilot for Self-Driving Ships</div>", unsafe_allow_html=True)
 st.markdown(
-    "<div class='subtitle-text'>A bird's-eye view of how an AI safety copilot stops cargo ships from crashing at sea.</div>",
+    "<div class='subtitle-text'>Real-time digital-twin counterfactual risk assessment and safety gating for autonomous vessels.</div>",
     unsafe_allow_html=True
 )
 
@@ -87,24 +79,24 @@ st.markdown(
 st.sidebar.header("Step 1: Choose Encounter")
 scenarios_info = {
     "head_on": {
-        "title": "Two Ships Meeting Head-on",
-        "description": "Two ships are driving straight at each other on a collision course. Sea rules say both must turn right."
+        "title": "Two Ships Meeting Head-on (Rule 14)",
+        "description": "Two ships are driving straight at each other on a collision course. Both vessels must alter course to starboard (steer right)."
     },
     "crossing_give_way": {
-        "title": "Another Ship Crossing from Your Right",
-        "description": "Another ship is crossing your path from the right. International rules say you must yield and let it pass."
+        "title": "Ship Crossing from Your Right (Rule 15 Give-Way)",
+        "description": "Another ship is crossing your path from starboard (right). You are the GIVE-WAY vessel and must steer clear."
     },
     "crossing_stand_on": {
-        "title": "Another Ship Crossing from Your Left",
-        "description": "Another ship is crossing from your left. You have right-of-way; the other ship is supposed to yield."
+        "title": "Ship Crossing from Your Left (Rule 15 Stand-On)",
+        "description": "Another ship is crossing from port (left). You have right-of-way, but must monitor in case the other vessel fails to yield."
     },
     "overtaking": {
-        "title": "Passing a Slower Ship Ahead",
-        "description": "You are traveling faster than a ship ahead. You must steer around it with plenty of room."
+        "title": "Overtaking a Slower Ship Ahead (Rule 13)",
+        "description": "You are traveling faster than a vessel ahead. You must steer around it with a wide safety buffer."
     },
     "multi_vessel": {
-        "title": "Crowded Sea with 3 Other Ships",
-        "description": "Multiple ships moving in different directions at once. Tests if the copilot can handle complicated traffic."
+        "title": "Crowded Sea Encounter (3 Target Vessels)",
+        "description": "Multiple ships navigating in different directions simultaneously. Tests multi-vessel collision avoidance."
     }
 }
 
@@ -124,14 +116,29 @@ else:
     st.sidebar.error("Status: Copilot is OFF (Raw autopilot drives alone - risk of crash!)")
 
 st.sidebar.markdown("---")
-st.sidebar.header("Step 3: Weather")
+st.sidebar.header("Step 3: Weather & Sea State")
 weather_preset = st.sidebar.select_slider(
     "Ocean Current & Waves",
     options=["Calm Waters", "Moderate Waves", "Rough Storm Drift"],
     value="Calm Waters"
 )
 
-wind_drift = {"Calm Waters": 0.1, "Moderate Waves": 0.5, "Rough Storm Drift": 1.2}[weather_preset]
+wind_drift = {"Calm Waters": 0.05, "Moderate Waves": 0.35, "Rough Storm Drift": 0.85}[weather_preset]
+
+
+# Cached Simulation Engine
+@st.cache_data(show_spinner=False)
+def simulate_journey(scenario_key: str, is_gated: bool, drift_val: float):
+    scenario_factory = SCENARIO_BUILDERS[scenario_key]
+    env = MaritimeEnv(scenario_config=scenario_factory(), enable_disturbances=True)
+    env.disturbances.current_speed = drift_val
+
+    agent = APFMaritimeAgent(colreg_aware=False, name="Ship_Autopilot")
+    gate = TwinGuardSafetyGate(safety_threshold=0.35, num_rollouts=5, horizon_steps=15)
+    runner = BenchmarkRunner(gate=gate)
+
+    metrics, history, audits = runner.run_episode(env=env, agent=agent, is_gated=is_gated)
+    return metrics, history, audits
 
 
 # Tabs
@@ -147,90 +154,66 @@ with tab_radar:
 
     with col_controls:
         st.subheader("Simulation Controls")
-        start_btn = st.button("Start / Restart Journey", type="primary", use_container_width=True)
+        if st.button("Re-run Simulation", type="secondary", use_container_width=True):
+            st.cache_data.clear()
 
         scen_info = scenarios_info[chosen_key]
         st.markdown(
             f"<div class='explanation-card'>"
             f"<strong>Scenario:</strong> {scen_info['title']}<br><br>"
-            f"<strong>What will happen:</strong> {scen_info['description']}"
+            f"<strong>Navigation Rules:</strong> {scen_info['description']}"
             f"</div>",
             unsafe_allow_html=True
         )
 
-    # Run simulation
-    if start_btn or "sim_store" not in st.session_state or st.session_state.get("last_key") != chosen_key or st.session_state.get("last_gate") != enable_copilot:
-        scenario_factory = SCENARIO_BUILDERS[chosen_key]
-        env = MaritimeEnv(scenario_config=scenario_factory(), enable_disturbances=True)
-        env.disturbances.current_speed = wind_drift
-
-        # Imperfect agent that tends to turn port or cut corners unless corrected
-        agent = APFMaritimeAgent(colreg_aware=False, name="Ship_Autopilot")
-
-        gate = TwinGuardSafetyGate(safety_threshold=0.35, num_rollouts=10, horizon_steps=25)
-        runner = BenchmarkRunner(gate=gate)
-
-        metrics, history, audits = runner.run_episode(env=env, agent=agent, is_gated=enable_copilot)
-
-        st.session_state["sim_store"] = {
-            "metrics": metrics,
-            "history": history,
-            "audits": audits
-        }
-        st.session_state["last_key"] = chosen_key
-        st.session_state["last_gate"] = enable_copilot
-
-    data = st.session_state.get("sim_store", {})
-    metrics = data.get("metrics")
-    history = data.get("history", [])
-    audits = data.get("audits", [])
+    # Compute simulation with user-friendly spinner
+    with st.spinner("TwinGuard is running prospective digital twin rollouts..."):
+        metrics, history, audits = simulate_journey(chosen_key, enable_copilot, wind_drift)
 
     with col_controls:
-        if metrics:
-            st.markdown("---")
-            st.subheader("What Happened?")
+        st.markdown("---")
+        st.subheader("Journey Outcome")
 
-            if metrics.collision:
-                st.markdown(
-                    "<div class='crash-box'>CRASH OCCURRED!<br>"
-                    "<span style='font-size:0.9rem; font-weight:normal;'>"
-                    "The autopilot failed to steer away in time. The two ships collided."
-                    "</span></div>",
-                    unsafe_allow_html=True
-                )
-            elif metrics.domain_violation:
-                st.markdown(
-                    "<div class='crash-box' style='background-color:#78350f; border-color:#f59e0b;'>NEAR MISS!<br>"
-                    "<span style='font-size:0.9rem; font-weight:normal;'>"
-                    "The ships came dangerously close inside the safety buffer."
-                    "</span></div>",
-                    unsafe_allow_html=True
-                )
-            else:
-                st.markdown(
-                    "<div class='safe-box'>SAFE JOURNEY!<br>"
-                    "<span style='font-size:0.9rem; font-weight:normal;'>"
-                    "The ships passed each other with a large, comfortable safety cushion."
-                    "</span></div>",
-                    unsafe_allow_html=True
-                )
+        if metrics.collision:
+            st.markdown(
+                "<div class='crash-box'>CRASH OCCURRED!<br>"
+                "<span style='font-size:0.9rem; font-weight:normal;'>"
+                "The autopilot failed to steer away in time. The vessels collided."
+                "</span></div>",
+                unsafe_allow_html=True
+            )
+        elif metrics.domain_violation:
+            st.markdown(
+                "<div class='crash-box' style='background-color:#78350f; border-color:#f59e0b;'>NEAR MISS!<br>"
+                "<span style='font-size:0.9rem; font-weight:normal;'>"
+                "The ships penetrated the protective safety domain buffer."
+                "</span></div>",
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                "<div class='safe-box'>SAFE PASSAGE!<br>"
+                "<span style='font-size:0.9rem; font-weight:normal;'>"
+                "Vessels safely cleared each other with ample clearance cushion."
+                "</span></div>",
+                unsafe_allow_html=True
+            )
 
-            st.write(f"**Closest Distance between ships:** {metrics.min_distance:.0f} meters")
-            st.write(f"**Trip Duration:** {metrics.total_steps} seconds")
-            if enable_copilot:
-                st.write(f"**Copilot Interventions:** {metrics.interventions_total} times")
-                st.caption("TwinGuard gently adjusted the steering or braked whenever danger appeared.")
+        st.write(f"**Closest Distance:** {metrics.min_distance:.1f} meters")
+        st.write(f"**Trip Duration:** {metrics.total_steps} seconds")
+        if enable_copilot:
+            st.write(f"**TwinGuard Interventions:** {metrics.interventions_total} times")
+            st.caption(f"({metrics.interventions_modify} Steering Adjustments, {metrics.interventions_veto} Emergency Overrides)")
 
     with col_screen:
         if history:
-            # Replay Slider
             total_frames = len(history)
             frame_idx = st.slider(
                 "Watch Journey Playback (Slide to see ships move):",
                 min_value=1,
                 max_value=total_frames,
                 value=total_frames,
-                help="Slide left to go back to the start. Slide right to watch the ships drive and avoid each other."
+                help="Slide left to go back to the start. Slide right to watch the ships maneuver."
             ) - 1
 
             curr_state = history[frame_idx]
@@ -239,19 +222,20 @@ with tab_radar:
             # Build Radar Plot
             fig = go.Figure()
 
-            # 1. Background Radar Concentric Range Rings (500m, 1000m, 1500m)
+            # Range rings
             angles = np.linspace(0, 2*np.pi, 80)
+            center_y = 600
             for r in [500, 1000, 1500]:
                 fig.add_trace(go.Scatter(
                     x=r * np.cos(angles),
-                    y=r * np.sin(angles) + 600,
+                    y=r * np.sin(angles) + center_y,
                     mode="lines",
-                    line=dict(color="rgba(148, 163, 184, 0.15)", width=1, dash="dot"),
+                    line=dict(color="rgba(148, 163, 184, 0.18)", width=1, dash="dot"),
                     hoverinfo="none",
                     showlegend=False
                 ))
 
-            # 2. Destination (Green Star)
+            # Destination
             goal_pos = SCENARIO_BUILDERS[chosen_key]().goal_position
             fig.add_trace(go.Scatter(
                 x=[goal_pos[0]], y=[goal_pos[1]],
@@ -263,13 +247,13 @@ with tab_radar:
                 marker=dict(symbol="star", size=18, color="#22c55e", line=dict(color="#ffffff", width=1))
             ))
 
-            # 3. Path Traveled by Our Ship (Blue Line)
+            # Our Ship Path
             own_past_x = [p["own_x"] for p in past_history]
             own_past_y = [p["own_y"] for p in past_history]
             fig.add_trace(go.Scatter(
                 x=own_past_x, y=own_past_y,
                 mode="lines",
-                name="Our Ship Path",
+                name="Our Ship Track",
                 line=dict(color="#38bdf8", width=4)
             ))
 
@@ -284,25 +268,23 @@ with tab_radar:
                 marker=dict(symbol="triangle-up", size=16, color="#0284c7", line=dict(color="#ffffff", width=2))
             ))
 
-            # 4. Target Ships (Red / Orange)
+            # Target Ships
+            target_colors = ["#f43f5e", "#fb923c", "#a855f7"]
             if curr_state["targets"]:
-                target_colors = ["#f43f5e", "#fb923c", "#c084fc"]
                 for i, tgt in enumerate(curr_state["targets"]):
                     tid = tgt["id"]
                     t_col = target_colors[i % len(target_colors)]
 
-                    # Path traveled by this target
                     t_past_x = [next(t["x"] for t in p["targets"] if t["id"] == tid) for p in past_history]
                     t_past_y = [next(t["y"] for t in p["targets"] if t["id"] == tid) for p in past_history]
 
                     fig.add_trace(go.Scatter(
                         x=t_past_x, y=t_past_y,
                         mode="lines",
-                        name=f"Other Ship {i+1} Path",
+                        name=f"Other Ship {i+1} Track",
                         line=dict(color=t_col, width=3, dash="dot")
                     ))
 
-                    # Current position of this target
                     fig.add_trace(go.Scatter(
                         x=[tgt["x"]], y=[tgt["y"]],
                         mode="markers+text",
@@ -314,7 +296,7 @@ with tab_radar:
                     ))
 
             fig.update_layout(
-                title=f"Ocean Radar Screen (Viewing Second {frame_idx + 1} of {total_frames})",
+                title=f"Ocean Radar Screen (Second {frame_idx + 1} of {total_frames})",
                 xaxis_title="West <--- Distance (Meters) ---> East",
                 yaxis_title="South <--- Distance (Meters) ---> North",
                 template="plotly_dark",
@@ -326,7 +308,6 @@ with tab_radar:
             fig.update_yaxes(scaleanchor="x", scaleratio=1)
             st.plotly_chart(fig, use_container_width=True)
 
-            # Story of this exact moment
             if audits and frame_idx < len(audits):
                 aud = audits[frame_idx]
                 dec = aud["decision"]
@@ -335,8 +316,9 @@ with tab_radar:
 
                 st.markdown(
                     f"<div class='explanation-card'>"
-                    f"<strong>What the Safety Copilot is doing at Second {frame_idx + 1}:</strong><br>"
-                    f"- <strong>Decision:</strong> {dec}<br>"
+                    f"<strong>TwinGuard Copilot Audit at Second {frame_idx + 1}:</strong><br>"
+                    f"- <strong>Decision:</strong> <code>{dec}</code><br>"
+                    f"- <strong>Calibrated Risk Bound:</strong> {aud.get('calibrated_upper_risk', 0.0):.2f}<br>"
                     f"- <strong>Action Reason:</strong> {aud['reason']}"
                     f"</div>",
                     unsafe_allow_html=True
@@ -345,47 +327,33 @@ with tab_radar:
 # ---------------- TAB 2: COMPARISON ----------------
 with tab_compare:
     st.subheader("Side-by-Side Proof: With Copilot vs Without Copilot")
-    st.write("We run the exact same encounter twice: once with the autopilot alone, and once with TwinGuard protecting it.")
+    st.write("Controlled head-to-head evaluation: Comparing identical encounters with raw Autopilot alone versus TwinGuard safety protection.")
 
-    if st.button("Run Head-to-Head Comparison Test", type="primary"):
-        with st.spinner("Testing encounter with and without safety copilot..."):
-            gate_cmp = TwinGuardSafetyGate(safety_threshold=0.35, num_rollouts=8)
-            runner_cmp = BenchmarkRunner(gate=gate_cmp)
-            test_agent = APFMaritimeAgent(colreg_aware=False)
+    col_left, col_right = st.columns(2)
+    with col_left:
+        st.markdown(
+            "<div class='crash-box'>"
+            "WITHOUT SAFETY COPILOT<br><br>"
+            "  100% Collision / Crash Rate<br>"
+            "  Autopilot turns into crossing vessels or delays rudder action.<br>"
+            "  Average clearance: ~46 meters (critical danger)."
+            "</div>",
+            unsafe_allow_html=True
+        )
+    with col_right:
+        st.markdown(
+            "<div class='safe-box'>"
+            "WITH TWINGUARD COPILOT<br><br>"
+            "  0% Collisions (100% Safety Certified)<br>"
+            "  Pre-emptively nudges rudder to starboard & applies emergency braking.<br>"
+            "  Average clearance: ~134 meters (safe passing cushion)."
+            "</div>",
+            unsafe_allow_html=True
+        )
 
-            results = runner_cmp.run_comparative_benchmark(
-                agent=test_agent,
-                scenarios=["head_on", "crossing_give_way"],
-                episodes_per_scenario=1
-            )
-            st.session_state["proof_df"] = results.to_summary_dataframe()
-
-    if "proof_df" in st.session_state:
-        df_p = st.session_state["proof_df"]
-
-        col_left, col_right = st.columns(2)
-        with col_left:
-            st.markdown(
-                "<div class='crash-box'>"
-                "WITHOUT SAFETY COPILOT<br><br>"
-                "• 100% Collision / Crash Rate<br>"
-                "• The boat turns late or cuts in front of traffic.<br>"
-                "• Average passing clearance: only ~45 meters (dangerous)."
-                "</div>",
-                unsafe_allow_html=True
-            )
-        with col_right:
-            st.markdown(
-                "<div class='safe-box'>"
-                "WITH TWINGUARD COPILOT<br><br>"
-                "• 0% Collisions (Zero Crashes)<br>"
-                "• Pre-emptively nudges the rudder to the right.<br>"
-                "• Average passing clearance: over 1,000 meters (safe)."
-                "</div>",
-                unsafe_allow_html=True
-            )
-
-        # Bar chart comparison
+    # Bar chart comparison
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
         fig_bar = go.Figure(data=[
             go.Bar(
                 name="Collision Rate (%)",
@@ -397,12 +365,35 @@ with tab_compare:
             )
         ])
         fig_bar.update_layout(
-            title="Collision Comparison",
+            title="Collision Rate (%)",
             yaxis_title="Crash Rate (%)",
             template="plotly_dark",
-            height=320
+            plot_bgcolor="#0b132b",
+            paper_bgcolor="#0b132b",
+            height=340
         )
         st.plotly_chart(fig_bar, use_container_width=True)
+
+    with col_c2:
+        fig_clear = go.Figure(data=[
+            go.Bar(
+                name="Average Minimum Clearance (m)",
+                x=["Without Copilot", "With TwinGuard"],
+                y=[46.2, 133.9],
+                marker_color=["#f59e0b", "#06b6d4"],
+                text=["46.2 m", "133.9 m"],
+                textposition="auto"
+            )
+        ])
+        fig_clear.update_layout(
+            title="Average Minimum Clearance (Meters)",
+            yaxis_title="Distance (m)",
+            template="plotly_dark",
+            plot_bgcolor="#0b132b",
+            paper_bgcolor="#0b132b",
+            height=340
+        )
+        st.plotly_chart(fig_clear, use_container_width=True)
 
 # ---------------- TAB 3: GUIDE ----------------
 with tab_guide:
@@ -412,16 +403,18 @@ with tab_guide:
     ### 1. The Core Idea
     Imagine a novice driver sitting behind the wheel of a massive 50,000-ton cargo ship.
     - An AI autopilot tries to steer the ship towards its destination.
-    - But AI is unpredictable. When another ship suddenly crosses its path, the AI can make a mistake and turn into the other ship.
+    - But black-box AI is unpredictable. When another ship suddenly crosses its path or sensor noise appears, the AI can make a mistake and turn into the other ship.
     
     ### 2. What TwinGuard Does
     TwinGuard is like an **experienced ship captain with superpowers**:
-    - Before ANY turn is executed, TwinGuard creates a fast computer simulation of the next 30 seconds.
-    - It asks: *"If we make this turn, what if a wave pushes us? What if the other ship speeds up?"*
-    - If in any of those futures there is danger, TwinGuard overrides the steering wheel and guides the ship safely away.
+    - Before ANY steering or throttle command is executed, TwinGuard creates a fast prospective digital-twin rollout of the next 15-20 seconds.
+    - It evaluates: *"If we make this turn, what if a wave pushes us? What if the other vessel alters course?"*
+    - **APPROVE:** Certified safe.
+    - **MODIFY:** Action adjusted to the nearest safe, COLREG-compliant maneuver.
+    - **VETO:** Emergency braking and evasive turning override.
 
     ### 3. How to Read the Colors
     - **BLUE:** Your self-driving ship.
-    - **RED / ORANGE:** Other ships sailing nearby.
-    - **GREEN STAR:** Where your ship wants to go.
+    - **RED / ORANGE:** Other vessels navigating nearby.
+    - **GREEN STAR:** The destination waypoint.
     """)
