@@ -53,18 +53,17 @@ class SafetyActionFilter:
             (0.0, 0.2618),    # +15 deg
             (-1.5, 0.1745),   # -1.5 m/s, +10 deg
             (-1.5, 0.2618),   # -1.5 m/s, +15 deg
-            (0.0, 0.0873),    # +5 deg
             (0.0, 0.3491),    # +20 deg
-            (-1.5, 0.0873),   # -1.5 m/s, +5 deg
-            (-3.0, 0.1745),   # -3.0 m/s, +10 deg
             (-1.5, 0.3491),   # -1.5 m/s, +20 deg
-            (-3.0, 0.2618),   # -3.0 m/s, +15 deg
-            (0.0, -0.0873),   # -5 deg
-            (0.0, -0.1745),   # -10 deg
+            (-2.5, 0.3491),   # -2.5 m/s, +20 deg
+            (0.0, 0.4363),    # +25 deg
+            (-2.0, 0.4363),   # -2.0 m/s, +25 deg
+            (0.0, 0.0873),    # +5 deg
+            (-1.5, 0.0873),   # -1.5 m/s, +5 deg
         ]
 
         for ds, dr in candidate_offsets:
-            cand_speed = _clamp(orig_speed + ds, 2.0, 12.0)
+            cand_speed = _clamp(orig_speed + ds, 3.0, 12.0)
             cand_rudder = _clamp(orig_rudder + dr, -0.6108, 0.6108)
             cand_act = np.array([cand_speed, cand_rudder], dtype=np.float32)
 
