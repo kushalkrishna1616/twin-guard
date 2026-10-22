@@ -212,6 +212,9 @@ class MaritimeEnv(gym.Env):
             "static_obstacles": list(self.static_obstacles)
         })
 
+    def _get_observation(self) -> np.ndarray:
+        return self._get_obs()
+
     def _get_obs(self) -> np.ndarray:
         obs = np.zeros(22, dtype=np.float32)
         d_goal = self.goal_position - self.own_ship.position
