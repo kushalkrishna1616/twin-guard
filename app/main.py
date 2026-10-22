@@ -265,13 +265,66 @@ def render_realistic_ocean_view(history: list[dict], audits: list[dict], goal_po
     with open(template_path, "r", encoding="utf-8") as f:
         html_code = f.read()
 
-    html_code = html_code.replace("__HISTORY_JSON__", json.dumps(history))
-    html_code = html_code.replace("__AUDITS_JSON__", json.dumps(audits))
-    html_code = html_code.replace("__GOAL_JSON__", json.dumps(list(goal_pos)))
-    html_code = html_code.replace("__OBS_JSON__", json.dumps(list(static_obs)))
-    html_code = html_code.replace("__MAX_FRAMES__", str(len(history) - 1))
+    # Robust serialization and data transformation
+    sanitized_history = []
+    for h in history:
+        sanitized_targets = []
+        for t in h.get("targets", []):
+            if isinstance(t, dict):
+                sanitized_targets.append({
+                    "x": float(t.get("x", 0.0)),
+                    "y": float(t.get("y", 0.0)),
+                    "course": float(t.get("course", 0.0)),
+                    "speed": float(t.get("speed", 0.0)),
+                    "mmsi": str(t.get("mmsi", "Target")),
+                    "length": float(t.get("length", 110.0)),
+                    "beam": float(t.get("beam", 30.0))
+                })
+        sanitized_obs = []
+        for ob in h.get("static_obstacles", []):
+            if isinstance(ob, (list, tuple)) and len(ob) >= 3:
+                sanitized_obs.append([float(ob[0]), float(ob[1]), float(ob[2])])
+            elif isinstance(ob, dict):
+                sanitized_obs.append([float(ob.get("x", 0.0)), float(ob.get("y", 0.0)), float(ob.get("radius", 60.0))])
 
-    st.components.v1.html(html_code, height=620)
+        sanitized_history.append({
+            "step": int(h.get("step", 0)),
+            "own_x": float(h.get("own_x", 0.0)),
+            "own_y": float(h.get("own_y", 0.0)),
+            "own_course": float(h.get("own_course", 0.0)),
+            "own_speed": float(h.get("own_speed", 0.0)),
+            "targets": sanitized_targets,
+            "static_obstacles": sanitized_obs
+        })
+
+    sanitized_audits = []
+    for a in audits:
+        dec = a.get("decision", "APPROVE")
+        if hasattr(dec, "value"):
+            dec = dec.value
+        sanitized_audits.append({
+            "step": int(a.get("step", 0)),
+            "decision": str(dec),
+            "calibrated_upper_risk": float(a.get("calibrated_upper_risk", 0.0)),
+            "reason": str(a.get("reason", ""))
+        })
+
+    formatted_obs = []
+    for ob in static_obs:
+        if isinstance(ob, (list, tuple)) and len(ob) >= 3:
+            formatted_obs.append([float(ob[0]), float(ob[1]), float(ob[2])])
+        elif isinstance(ob, dict):
+            formatted_obs.append([float(ob.get("x", 0.0)), float(ob.get("y", 0.0)), float(ob.get("radius", 60.0))])
+
+    formatted_goal = [float(goal_pos[0]), float(goal_pos[1])] if len(goal_pos) >= 2 else [0.0, 1000.0]
+
+    html_code = html_code.replace("__HISTORY_JSON__", json.dumps(sanitized_history))
+    html_code = html_code.replace("__AUDITS_JSON__", json.dumps(sanitized_audits))
+    html_code = html_code.replace("__GOAL_JSON__", json.dumps(formatted_goal))
+    html_code = html_code.replace("__OBS_JSON__", json.dumps(formatted_obs))
+    html_code = html_code.replace("__MAX_FRAMES__", str(max(0, len(sanitized_history) - 1)))
+
+    st.components.v1.html(html_code, height=640)
 
 
 # Cached Simulation
