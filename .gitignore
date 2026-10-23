@@ -36,3 +36,5 @@ Thumbs.db
 *.jpg
 *.jpeg
 *.webp
+!ship.jpg
+!ship_horizontal.jpg

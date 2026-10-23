@@ -28,12 +28,29 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom Styling
-st.markdown("""
-<style>
+import base64
+
+def _get_bg_css() -> str:
+    for candidate in ["ship_horizontal.jpg", os.path.join(os.path.dirname(__file__), "..", "ship_horizontal.jpg"), os.path.join(os.getcwd(), "ship_horizontal.jpg")]:
+        if os.path.exists(candidate):
+            with open(candidate, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode()
+            return f"""
+    .stApp {{
+        background: linear-gradient(rgba(3, 13, 26, 0.72), rgba(2, 9, 20, 0.82)), url('data:image/jpeg;base64,{b64}') !important;
+        background-size: cover !important;
+        background-position: center bottom !important;
+        background-attachment: fixed !important;
+    }}
+    """
+    return """
     .stApp {
         background-color: #030d1a;
     }
+    """
+
+# Custom Styling
+st.markdown("<style>\n" + _get_bg_css() + """
     .title-text {
         font-size: 2.3rem;
         font-weight: 800;
